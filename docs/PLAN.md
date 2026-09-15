@@ -1,91 +1,95 @@
 ---
-PLAN: "feat: binary (blob) columns and batched transactions"
+PLAN: "feat: columnas binarias (blob) y transacciones por lote"
 TAG: v0.2.0
 EXECUTOR: unassigned
 REVIEWER: none
 ---
 
-> Part of the browser-native semantic search effort. Master index:
-> https://github.com/webtyp/agent/blob/main/docs/PLAN.md — decisions **D1** and **D2**
-> there are the rationale for the representation chosen below.
+> Parte del esfuerzo de búsqueda semántica nativa en el navegador. Índice maestro:
+> https://github.com/webtyp/agent/blob/main/docs/PLAN.md — las decisiones **D1** y **D2** de
+> ahí son la justificación de la representación elegida abajo.
+>
+> **Nota de idioma:** la prosa va en español; los bloques de código mantienen sus
+> comentarios en inglés, como el resto del código fuente de este repositorio.
 
-# Plan — make IndexedDB able to carry a vector
+# Plan — que IndexedDB pueda transportar un vector
 
-## Why
+## Por qué
 
-This driver cannot store binary data, and the failure mode is the worst available.
+Este driver no puede guardar datos binarios, y el modo de falla es el peor disponible.
 
-`create` (`execute.go:44-49`) builds a `map[string]any` from `q.Columns`/`q.Values` and
-hands it to `store.Call("add", data)`. `Call` converts arguments through `js.ValueOf`,
-which supports `[]any` but **not `[]byte`** and **not `[]float32`** — it panics on
-anything else. `getStore` (`tx.go`) already documents the consequence in this very
-repository:
+`create` (`execute.go:44-49`) arma un `map[string]any` a partir de `q.Columns`/`q.Values` y
+se lo entrega a `store.Call("add", data)`. `Call` convierte los argumentos con `js.ValueOf`,
+que soporta `[]any` pero **no `[]byte`** y **no `[]float32`** — hace pánico con cualquier
+otra cosa. `getStore` (`tx.go`) ya documenta la consecuencia en este mismo repositorio:
 
 > Calling `transaction()` with an unknown store throws a NotFoundError, which is
 > unrecoverable under TinyGo wasm (`recover()` not supported on this target).
 
-The same applies here: a `js.ValueOf` panic on a blob column is an **unrecoverable crash
-of the whole application**, not an error return. So today a `model.Blob()` column does
-not merely fail to persist — it takes the page down.
+Lo mismo aplica acá: un pánico de `js.ValueOf` sobre una columna blob es un **crash
+irrecuperable de toda la aplicación**, no un retorno de error. Así que hoy una columna
+`model.Blob()` no solamente falla en persistirse — se lleva puesta la página.
 
-Four more paths have the same shape. Each dispatches on `f.Type.Storage()` over a
-`switch` that covers `FieldText`/`FieldInt`/`FieldFloat`/`FieldBool` and silently drops
-everything else:
+Otros cuatro caminos tienen la misma forma. Cada uno despacha sobre `f.Type.Storage()` con
+un `switch` que cubre `FieldText`/`FieldInt`/`FieldFloat`/`FieldBool` y descarta
+silenciosamente todo lo demás:
 
-| Location | Effect on a blob column |
+| Ubicación | Efecto sobre una columna blob |
 |---|---|
-| `execute.go:update` (PK fast path, ~line 88) | the field is dropped from `data`, so an update to any other column **erases the vector** |
-| `execute.go:update` (cursor path, ~line 130) | same erasure |
-| `adapter.go:simpleRows.Scan` (~line 147) | the blob is skipped; the destination keeps its previous value |
-| `execute.go:checkCondition` | `val.Type()` is `js.TypeObject` for a `Uint8Array` → `return false`, so a blob never matches any condition, including `IS NOT NULL` |
+| `execute.go:update` (camino rápido de PK, ~línea 88) | el campo se descarta de `data`, así que actualizar cualquier otra columna **borra el vector** |
+| `execute.go:update` (camino de cursor, ~línea 130) | mismo borrado |
+| `adapter.go:simpleRows.Scan` (~línea 147) | el blob se saltea; el destino conserva su valor anterior |
+| `execute.go:checkCondition` | `val.Type()` es `js.TypeObject` para un `Uint8Array` → `return false`, así que un blob nunca coincide con ninguna condición, incluido `IS NOT NULL` |
 
-`mapResult` delegates to `jsvalue.ScanValue`, whose `Uint8Array` support is **unverified
-and is the first task below**.
+`mapResult` delega en `jsvalue.ScanValue`, cuyo soporte de `Uint8Array` está **sin verificar
+y es la primera tarea de abajo**.
 
-Separately: `getStore` opens a **new transaction per call**, so inserting a shard set of
-1024 rows costs 1024 transactions. IndexedDB transactions auto-commit when the event loop
-yields, so this is not just slow, it is non-atomic: a failure halfway leaves the store in
-a torn state with no way to roll back.
+Aparte: `getStore` abre una **transacción nueva por llamada**, así que insertar un conjunto
+de shard de 1024 filas cuesta 1024 transacciones. Las transacciones de IndexedDB
+auto-confirman cuando el event loop cede, así que esto no es solo lento: es no-atómico, y
+una falla a mitad de camino deja el store en un estado partido sin forma de revertir.
 
-## What does NOT change
+## Lo que NO cambia
 
-`processCursorRequest` (`tx.go`) stays exactly as it is. The note in
-`docs/LAST_PLAN_EXECUTED.md` explaining why it must not become `await.Request` still
-holds — it is a multi-event iterator, not a one-shot request.
+`processCursorRequest` (`tx.go`) queda exactamente como está. La nota en
+`docs/LAST_PLAN_EXECUTED.md` que explica por qué no debe convertirse en `await.Request`
+sigue vigente — es un iterador multi-evento, no un request de un solo disparo.
 
-The `initialize`/`onUpgradeNeeded`/`onOpenExistingDB` lifecycle machinery in `adapter.go`
-is untouched.
+La maquinaria de ciclo de vida `initialize`/`onUpgradeNeeded`/`onOpenExistingDB` de
+`adapter.go` queda intacta.
 
-`storage.Query` is not extended and **no vector-specific API is added to this driver**.
-This driver learns to carry bytes; it learns nothing about embeddings, similarity or
-search. Decision **D2** puts vectors in shard blobs, so `vectordb` reads them through the
-ordinary `ReadAll` path and does its own maths. A `similaritySearch` method on this
-adapter would be a responsibility violation and is explicitly rejected.
+`storage.Query` no se extiende y **no se agrega ninguna API específica de vectores a este
+driver**. Este driver aprende a transportar bytes; no aprende nada sobre embeddings,
+similitud ni búsqueda. La decisión **D2** pone los vectores en blobs de shard, así que
+`vectordb` los lee por el camino ordinario de `ReadAll` y hace su propia matemática. Un
+método `similaritySearch` en este adaptador sería una violación de responsabilidad y queda
+explícitamente rechazado.
 
-`FieldIntSlice`, `FieldStruct` and `FieldStructSlice` remain unsupported. This plan adds
-`FieldBlob` only. The `default` branches added in §2 will make the others fail loudly
-instead of silently, which is an improvement, but implementing them is out of scope.
+`FieldIntSlice`, `FieldStruct` y `FieldStructSlice` siguen sin soporte. Este plan agrega
+solamente `FieldBlob`. Las ramas `default` que agrega la §2 van a hacer que los demás fallen
+ruidosamente en vez de en silencio, lo cual es una mejora, pero implementarlos queda fuera
+de alcance.
 
-## Changes
+## Cambios
 
-### 0. Verify `jsvalue.ScanValue` first — this gates everything
+### 0. Verificar `jsvalue.ScanValue` primero — esto condiciona todo lo demás
 
 ```bash
 go doc webtyp.com/jsvalue ScanValue
 grep -rn "Uint8Array\|CopyBytesToGo" "$(go env GOMODCACHE)"/webtyp.com/jsvalue*/
 ```
 
-- If it already scans a `Uint8Array` into `*[]byte`: `mapResult` needs no change.
-- If it does not: either extend `jsvalue` (preferred — it is the codec's job) or handle
-  `FieldBlob` in `mapResult` before delegating. Decide and record the decision in the
-  commit message.
+- Si ya escanea un `Uint8Array` hacia `*[]byte`: `mapResult` no necesita cambios.
+- Si no lo hace: o extender `jsvalue` (preferido — es el trabajo del códec) o manejar
+  `FieldBlob` en `mapResult` antes de delegar. Decidir y registrar la decisión en el mensaje
+  del commit.
 
-Do not start §1 before this is answered.
+No arrancar la §1 antes de tener esto respondido.
 
-### 1. `execute.go` — a JS-value encoder that knows about bytes
+### 1. `execute.go` — un encoder de valores JS que sepa de bytes
 
-Replace the direct `map[string]any` → `Call` handoff with an explicit encoder.
-`js.CopyBytesToJS` is the only bulk-copy primitive available, and TinyGo implements it:
+Reemplazar la entrega directa `map[string]any` → `Call` por un encoder explícito.
+`js.CopyBytesToJS` es la única primitiva de copia masiva disponible, y TinyGo la implementa:
 
 ```go
 // toJSValue converts a Go column value into a JS value safe to hand to
@@ -109,7 +113,8 @@ func toJSValue(v any) (js.Value, error) {
 }
 ```
 
-`create` then builds a `js.Value` object explicitly instead of a `map[string]any`:
+`create` entonces construye un objeto `js.Value` explícitamente en vez de un
+`map[string]any`:
 
 ```go
 data := js.Global().Get("Object").New()
@@ -123,12 +128,12 @@ for i, col := range q.Columns {
 req := store.Call("add", data)
 ```
 
-The `default` branch turning a crash into an `error` is the substantive win here,
-independent of vectors.
+La rama `default` que convierte un crash en un `error` es la ganancia sustantiva acá,
+independientemente de los vectores.
 
-### 2. `execute.go` + `adapter.go` — `FieldBlob` in all four switches
+### 2. `execute.go` + `adapter.go` — `FieldBlob` en los cuatro switches
 
-Add to each of the four `switch f.Type.Storage()` blocks listed in **Why**:
+Agregar a cada uno de los cuatro bloques `switch f.Type.Storage()` listados en **Por qué**:
 
 ```go
 case FieldBlob:
@@ -141,25 +146,26 @@ case FieldBlob:
 	data[f.Name] = b   // or: *p = b, in the Scan variants
 ```
 
-and, in the same edit, give every one of those switches a `default` that returns
+y, en la misma edición, darle a cada uno de esos switches un `default` que devuelva
 `fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)`.
-Silently dropping a column is how the update-erases-the-vector bug stayed invisible.
+Descartar una columna en silencio es cómo el bug de "update borra el vector" se mantuvo
+invisible.
 
-In `checkCondition`, add `js.TypeObject` handling:
+En `checkCondition`, agregar manejo de `js.TypeObject`:
 
 ```go
 // A Uint8Array is an object, so the scalar comparisons below cannot apply.
 // Blobs support equality and inequality only — never <, >, LIKE or IN.
 ```
 
-Implement `=` and `!=` by byte comparison, and return an error (not `false`) for an
-ordering or `LIKE` operator against a blob column, so a nonsensical query is reported
-instead of silently returning nothing.
+Implementar `=` y `!=` por comparación de bytes, y devolver un error (no `false`) para un
+operador de orden o `LIKE` contra una columna blob, para que una consulta sin sentido se
+reporte en vez de devolver nada en silencio.
 
-### 3. `adapter.go` — implement `storage.TxExecutor`
+### 3. `adapter.go` — implementar `storage.TxExecutor`
 
-`storage.TxExecutor`/`TxBoundExecutor` already exist and are type-asserted by callers.
-Implement them so a batch is one IndexedDB transaction:
+`storage.TxExecutor`/`TxBoundExecutor` ya existen y los llamadores les hacen type assertion.
+Implementalos para que un lote sea una sola transacción de IndexedDB:
 
 ```go
 // BeginTx opens ONE IndexedDB transaction spanning every declared object store
@@ -169,16 +175,18 @@ Implement them so a batch is one IndexedDB transaction:
 func (d *adapter) BeginTx() (storage.TxBoundExecutor, error)
 ```
 
-The bound executor holds the `tx` and resolves `objectStore(name)` from it instead of
-calling `getStore` (which would open a second transaction). `Commit` awaits the
-transaction's `complete` event; `Rollback` calls `tx.abort()`.
+El executor ligado sostiene la `tx` y resuelve `objectStore(name)` desde ella en vez de
+llamar a `getStore` (que abriría una segunda transacción). `Commit` espera el evento
+`complete` de la transacción; `Rollback` llama a `tx.abort()`.
 
-The auto-commit constraint is the hard part and must be called out in the doc comment:
-**anything that yields to the event loop between two requests ends the transaction.**
+La restricción de auto-commit es la parte difícil y tiene que quedar señalada en el
+comentario de doc: **cualquier cosa que ceda al event loop entre dos requests termina la
+transacción.**
 
-### 4. `execute.go` — `getStore` gains a transaction-aware sibling
+### 4. `execute.go` — `getStore` gana un hermano consciente de transacciones
 
-Extract the store lookup so both paths share the existence pre-check:
+Extraer la búsqueda del store para que ambos caminos compartan la verificación previa de
+existencia:
 
 ```go
 func (d *adapter) storeFrom(tx js.Value, table string) (js.Value, error)
@@ -187,42 +195,42 @@ func (d *adapter) getStore(table, mode string) (js.Value, error) // opens its ow
 
 ## Tests
 
-All under `//go:build wasm` in `tests/`, run in a real browser via `gotest -tinygo`.
-Add `tests/blob_test.go`:
+Todos bajo `//go:build wasm` en `tests/`, ejecutados en un navegador real vía
+`gotest -tinygo`. Agregar `tests/blob_test.go`:
 
-| Test | Asserts |
+| Test | Verifica |
 |---|---|
-| `TestBlob_RoundTripExact` | 1536 bytes (a 384-dim vector) round-trip byte for byte, including interior `0x00` and a trailing `0xFF` |
-| `TestBlob_EmptyAndNil` | an empty blob and an absent blob both read back as `nil`, matching `storage.ScanAny` |
-| `TestBlob_UpdateOtherColumnPreservesBlob` | **the regression test for the erasure bug**: update a text column, assert the vector is intact |
-| `TestBlob_UpdateReplacesBytes` | overwriting with equal-length different bytes leaves no trace of the old value |
-| `TestBlob_EqCondition` | `Where("vec").Eq(bytes)` matches by content |
-| `TestBlob_OrderByBlobIsError` | ordering by a blob column returns an error rather than an empty result |
-| `TestUnsupportedType_IsErrorNotPanic` | a `FieldIntSlice` column returns an error — proving the `default` branches work and nothing panics |
-| `TestTx_BatchInsertOneTransaction` | 1024 rows in one `BeginTx`/`Commit`; all present afterwards |
-| `TestTx_RollbackDiscards` | 1024 rows then `Rollback` leaves the store empty |
-| `TestTx_LargeShardBlob` | a single 4 MB blob (1024 × 384 × 4 bytes) round-trips — the real shard size from decision D2 |
+| `TestBlob_RoundTripExact` | 1536 bytes (un vector de 384 dims) hacen round-trip byte a byte, incluyendo `0x00` interior y un `0xFF` final |
+| `TestBlob_EmptyAndNil` | un blob vacío y un blob ausente se leen ambos como `nil`, coincidiendo con `storage.ScanAny` |
+| `TestBlob_UpdateOtherColumnPreservesBlob` | **el test de regresión del bug de borrado**: actualizar una columna de texto y verificar que el vector queda intacto |
+| `TestBlob_UpdateReplacesBytes` | sobrescribir con bytes distintos del mismo largo no deja rastro del valor anterior |
+| `TestBlob_EqCondition` | `Where("vec").Eq(bytes)` coincide por contenido |
+| `TestBlob_OrderByBlobIsError` | ordenar por una columna blob devuelve error en vez de un resultado vacío |
+| `TestUnsupportedType_IsErrorNotPanic` | una columna `FieldIntSlice` devuelve error — demostrando que las ramas `default` funcionan y nada hace pánico |
+| `TestTx_BatchInsertOneTransaction` | 1024 filas en un `BeginTx`/`Commit`; todas presentes después |
+| `TestTx_RollbackDiscards` | 1024 filas y después `Rollback` deja el store vacío |
+| `TestTx_LargeShardBlob` | un único blob de 4 MB (1024 × 384 × 4 bytes) hace round-trip — el tamaño real de shard de la decisión D2 |
 
-`tests/conformance_test.go` picks up the new `storage` clauses automatically; the
-factory must declare the new `conformance.Embedding` record as an object store alongside
+`tests/conformance_test.go` recoge las cláusulas nuevas de `storage` automáticamente; la
+factory tiene que declarar el nuevo record `conformance.Embedding` como object store junto a
 `Widget`.
 
-## Acceptance checklist
+## Checklist de aceptación
 
 ```bash
-grep -n "func toJSValue" execute.go              # → 1 match
-grep -c "case FieldBlob" execute.go adapter.go   # → 4 total across both files
-grep -c "default:" execute.go                    # → every Storage() switch has one
-grep -n "func (d \*adapter) BeginTx" adapter.go  # → 1 match
-grep -n "js.ValueOf(q.Values" execute.go         # → empty: no unchecked conversion remains
-grep -n "processCursorRequest" tx.go             # → unchanged, still present
+grep -n "func toJSValue" execute.go              # → 1 coincidencia
+grep -c "case FieldBlob" execute.go adapter.go   # → 4 en total entre ambos archivos
+grep -c "default:" execute.go                    # → cada switch sobre Storage() tiene uno
+grep -n "func (d \*adapter) BeginTx" adapter.go  # → 1 coincidencia
+grep -n "js.ValueOf(q.Values" execute.go         # → vacío: no queda ninguna conversión sin verificar
+grep -n "processCursorRequest" tx.go             # → sin cambios, sigue presente
 GOOS=js GOARCH=wasm go build ./...
 gotest -tinygo
 ```
 
-## Performance note for the reader
+## Nota de rendimiento para quien lea
 
-After this plan, a 384-dim vector costs 1536 bytes in IndexedDB and one `memcpy` in each
-direction. The rejected alternative — `[]any` through `js.ValueOf` — costs 384 boxed
-allocations and roughly 3 KB of JS heap per vector. That ratio is the whole reason this
-plan exists; see master index **D1**.
+Después de este plan, un vector de 384 dims cuesta 1536 bytes en IndexedDB y un `memcpy` en
+cada dirección. La alternativa rechazada — `[]any` a través de `js.ValueOf` — cuesta 384
+allocations boxeadas y alrededor de 3 KB de heap JS por vector. Esa relación es toda la
+razón por la que este plan existe; ver **D1** del índice maestro.
