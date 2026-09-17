@@ -3,6 +3,7 @@
 package indexdb
 
 import (
+	"bytes"
 	"sort"
 	"syscall/js"
 
@@ -14,35 +15,65 @@ import (
 	"webtyp.com/storage"
 )
 
-// execute implements storage.Adapter for IndexDB.
-func (d *adapter) execute(q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) error {
+type storeGetter func(table, mode string) (js.Value, error)
+
+func (d *adapter) executeWithStore(getStore storeGetter, q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) error {
 	switch q.Action {
 	case storage.ActionCreate:
-		return d.create(q, m)
+		return d.create(getStore, q, m)
 	case storage.ActionUpdate:
-		return d.update(q, m)
+		return d.update(getStore, q, m)
 	case storage.ActionDelete:
-		return d.delete(q, m)
+		return d.delete(getStore, q, m)
 	case storage.ActionReadOne:
-		return d.readOne(q, m)
+		return d.readOne(getStore, q, m)
 	case storage.ActionReadAll:
-		return d.readAll(q, factory, each, eachJS)
+		return d.readAll(getStore, q, factory, each, eachJS)
 	default:
 		return fmt.Err("Action not implemented")
 	}
 }
 
-func (d *adapter) create(q storage.Query, m Model) error {
+// execute implements storage.Adapter for IndexDB.
+func (d *adapter) execute(q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) error {
+	return d.executeWithStore(d.getStore, q, m, factory, each, eachJS)
+}
+
+// toJSValue converts a Go column value into a JS value safe to hand to
+// IndexedDB. It exists because js.ValueOf PANICS on []byte, and a panic
+// under TinyGo wasm is unrecoverable (no recover() on this target) — so
+// every value crossing the boundary is converted here, never implicitly.
+func toJSValue(v any) (js.Value, error) {
+	switch x := v.(type) {
+	case []byte:
+		// Structured clone stores a Uint8Array as binary: no JSON, no base64.
+		arr := js.Global().Get("Uint8Array").New(len(x))
+		if len(x) > 0 {
+			js.CopyBytesToJS(arr, x)
+		}
+		return arr, nil
+	case string, int, int64, float64, bool, nil:
+		return js.ValueOf(x), nil
+	default:
+		return js.Value{}, fmt.Err("indexdb: unsupported column type", fmt.Sprintf("%T", v))
+	}
+}
+
+func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) error {
 	// Establish a "readwrite" transaction block directed at the store mapped via q.Table.
-	store, err := d.getStore(q.Table, "readwrite")
+	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
 		return err
 	}
 
-	// Iterate structurally mapping q.Columns and q.Values onto a conventional JavaScript Map Object
-	data := make(map[string]any)
+	// Iterate structurally mapping q.Columns and q.Values onto a conventional JavaScript Object
+	data := js.Global().Get("Object").New()
 	for i, col := range q.Columns {
-		data[col] = q.Values[i]
+		jsVal, err := toJSValue(q.Values[i])
+		if err != nil {
+			return err
+		}
+		data.Set(col, jsVal)
 	}
 
 	// Deploy store.add() and explicitly await its resolution event.
@@ -51,8 +82,8 @@ func (d *adapter) create(q storage.Query, m Model) error {
 	return err
 }
 
-func (d *adapter) update(q storage.Query, m Model) error {
-	store, err := d.getStore(q.Table, "readwrite")
+func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
+	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
 		return err
 	}
@@ -69,7 +100,11 @@ func (d *adapter) update(q storage.Query, m Model) error {
 	// Optimize: single PK equality condition (handles updates with direct get and put)
 	if len(q.Conditions) == 1 && q.Conditions[0].Operator() == "=" && q.Conditions[0].Field() == pkName {
 		pkValue := q.Conditions[0].Value()
-		getReq := store.Call("get", pkValue)
+		jsKey, err := toJSValue(pkValue)
+		if err != nil {
+			return err
+		}
+		getReq := store.Call("get", jsKey)
 		val, err := await.Request(getReq)
 		if err != nil {
 			return err
@@ -80,19 +115,32 @@ func (d *adapter) update(q storage.Query, m Model) error {
 		}
 
 		// Overwrite fields
-		data := make(map[string]any)
+		data := js.Global().Get("Object").New()
 		for _, f := range fields {
 			jsVal := val.Get(f.Name)
 			if !jsVal.IsUndefined() {
 				switch f.Type.Storage() {
 				case FieldText:
-					data[f.Name] = jsVal.String()
+					data.Set(f.Name, jsVal.String())
 				case FieldInt:
-					data[f.Name] = int64(jsVal.Int())
+					data.Set(f.Name, int64(jsVal.Int()))
 				case FieldFloat:
-					data[f.Name] = jsVal.Float()
+					data.Set(f.Name, jsVal.Float())
 				case FieldBool:
-					data[f.Name] = jsVal.Bool()
+					data.Set(f.Name, jsVal.Bool())
+				case FieldBlob:
+					n := jsVal.Get("length").Int()
+					b := make([]byte, n)
+					if n > 0 {
+						js.CopyBytesToGo(b, jsVal)
+					}
+					arr, err := toJSValue(b)
+					if err != nil {
+						return err
+					}
+					data.Set(f.Name, arr)
+				default:
+					return fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
 				}
 			}
 		}
@@ -104,7 +152,11 @@ func (d *adapter) update(q storage.Query, m Model) error {
 					continue
 				}
 			}
-			data[col] = q.Values[i]
+			jsVal, err := toJSValue(q.Values[i])
+			if err != nil {
+				return err
+			}
+			data.Set(col, jsVal)
 		}
 
 		putReq := store.Call("put", data)
@@ -119,9 +171,15 @@ func (d *adapter) update(q storage.Query, m Model) error {
 	var matched []matchRecord
 
 	req := store.Call("openCursor")
+	var condErr error
 	err = processCursorRequest(req, func(cursor js.Value) bool {
 		val := cursor.Get("value")
-		if checkConditions(val, q.Conditions) {
+		match, err := checkConditions(val, q.Conditions)
+		if err != nil {
+			condErr = err
+			return false
+		}
+		if match {
 			matched = append(matched, matchRecord{val: val})
 		}
 		return true
@@ -129,21 +187,37 @@ func (d *adapter) update(q storage.Query, m Model) error {
 	if err != nil {
 		return err
 	}
+	if condErr != nil {
+		return condErr
+	}
 
 	for _, item := range matched {
-		data := make(map[string]any)
+		data := js.Global().Get("Object").New()
 		for _, f := range fields {
 			jsVal := item.val.Get(f.Name)
 			if !jsVal.IsUndefined() {
 				switch f.Type.Storage() {
 				case FieldText:
-					data[f.Name] = jsVal.String()
+					data.Set(f.Name, jsVal.String())
 				case FieldInt:
-					data[f.Name] = int64(jsVal.Int())
+					data.Set(f.Name, int64(jsVal.Int()))
 				case FieldFloat:
-					data[f.Name] = jsVal.Float()
+					data.Set(f.Name, jsVal.Float())
 				case FieldBool:
-					data[f.Name] = jsVal.Bool()
+					data.Set(f.Name, jsVal.Bool())
+				case FieldBlob:
+					n := jsVal.Get("length").Int()
+					b := make([]byte, n)
+					if n > 0 {
+						js.CopyBytesToGo(b, jsVal)
+					}
+					arr, err := toJSValue(b)
+					if err != nil {
+						return err
+					}
+					data.Set(f.Name, arr)
+				default:
+					return fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
 				}
 			}
 		}
@@ -155,7 +229,11 @@ func (d *adapter) update(q storage.Query, m Model) error {
 					continue
 				}
 			}
-			data[col] = q.Values[i]
+			jsVal, err := toJSValue(q.Values[i])
+			if err != nil {
+				return err
+			}
+			data.Set(col, jsVal)
 		}
 
 		putReq := store.Call("put", data)
@@ -168,8 +246,8 @@ func (d *adapter) update(q storage.Query, m Model) error {
 	return nil
 }
 
-func (d *adapter) delete(q storage.Query, m Model) error {
-	store, err := d.getStore(q.Table, "readwrite")
+func (d *adapter) delete(getStore storeGetter, q storage.Query, m Model) error {
+	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
 		return err
 	}
@@ -186,52 +264,83 @@ func (d *adapter) delete(q storage.Query, m Model) error {
 	// If it is a simple single equality condition on the PK, we can delete by key directly.
 	if len(q.Conditions) == 1 && q.Conditions[0].Operator() == "=" && q.Conditions[0].Field() == pkName {
 		pkValue := q.Conditions[0].Value()
-		req := store.Call("delete", pkValue)
+		jsKey, err := toJSValue(pkValue)
+		if err != nil {
+			return err
+		}
+		req := store.Call("delete", jsKey)
 		_, err = await.Request(req)
 		return err
 	}
 
 	// Otherwise, find matching records using a cursor and delete them.
 	req := store.Call("openCursor")
+	var condErr error
 
-	return processCursorRequest(req, func(cursor js.Value) bool {
+	err = processCursorRequest(req, func(cursor js.Value) bool {
 		val := cursor.Get("value")
 
-		if checkConditions(val, q.Conditions) {
+		match, err := checkConditions(val, q.Conditions)
+		if err != nil {
+			condErr = err
+			return false
+		}
+
+		if match {
 			cursor.Call("delete")
 		}
 
 		return true
 	})
+	if err != nil {
+		return err
+	}
+	return condErr
 }
 
-func (d *adapter) readOne(q storage.Query, m Model) error {
-	store, err := d.getStore(q.Table, "readonly")
+func (d *adapter) readOne(getStore storeGetter, q storage.Query, m Model) error {
+	store, err := getStore(q.Table, "readonly")
 	if err != nil {
 		return err
 	}
 
-	// Attempt to get by key if simple condition. We only do this if we are querying the PK.
-	// For simplicity, we'll try `get` first if it's a single equality, and fall back to cursor.
-	if len(q.Conditions) == 1 && q.Conditions[0].Operator() == "=" {
-		key := q.Conditions[0].Value()
-		req := store.Call("get", key)
-		result, err := await.Request(req)
-		if err == nil && result.Truthy() {
-			return mapResult(result, m)
+	fields := m.Schema()
+	pkName := ""
+	for _, f := range fields {
+		if f.IsPK() {
+			pkName = f.Name
+			break
 		}
-		// If not found by key, maybe it wasn't the PK. Fall back to cursor.
+	}
+
+	// Attempt to get by key if simple condition on the PK.
+	if len(q.Conditions) == 1 && q.Conditions[0].Operator() == "=" && q.Conditions[0].Field() == pkName {
+		key := q.Conditions[0].Value()
+		jsKey, err := toJSValue(key)
+		if err == nil {
+			req := store.Call("get", jsKey)
+			result, err := await.Request(req)
+			if err == nil && result.Truthy() && !result.IsUndefined() {
+				return mapResult(result, m)
+			}
+		}
+		// If not found by key, fall back to cursor.
 	}
 
 	// Otherwise, iterate with cursor until first match
 	req := store.Call("openCursor")
 	var found bool
+	var condErr error
 
 	err = processCursorRequest(req, func(cursor js.Value) bool {
 		val := cursor.Get("value")
 
 		// Check conditions
-		match := checkConditions(val, q.Conditions)
+		match, err := checkConditions(val, q.Conditions)
+		if err != nil {
+			condErr = err
+			return false
+		}
 
 		if match {
 			// Found it
@@ -249,6 +358,9 @@ func (d *adapter) readOne(q storage.Query, m Model) error {
 	if err != nil {
 		return err
 	}
+	if condErr != nil {
+		return condErr
+	}
 	if !found {
 		return storage.ErrNoRows
 	}
@@ -260,8 +372,8 @@ type matchedItem struct {
 	val   js.Value
 }
 
-func (d *adapter) readAll(q storage.Query, factory func() Model, each func(Model), eachJS func(js.Value)) error {
-	store, err := d.getStore(q.Table, "readonly")
+func (d *adapter) readAll(getStore storeGetter, q storage.Query, factory func() Model, each func(Model), eachJS func(js.Value)) error {
+	store, err := getStore(q.Table, "readonly")
 	if err != nil {
 		return err
 	}
@@ -269,11 +381,18 @@ func (d *adapter) readAll(q storage.Query, factory func() Model, each func(Model
 	req := store.Call("openCursor")
 
 	var matched []matchedItem
+	var condErr error
 
 	err = processCursorRequest(req, func(cursor js.Value) bool {
 		val := cursor.Get("value")
 
-		if checkConditions(val, q.Conditions) {
+		match, err := checkConditions(val, q.Conditions)
+		if err != nil {
+			condErr = err
+			return false
+		}
+
+		if match {
 			var newItem Model
 			if factory != nil {
 				newItem = factory()
@@ -293,9 +412,40 @@ func (d *adapter) readAll(q storage.Query, factory func() Model, each func(Model
 	if err != nil {
 		return err
 	}
+	if condErr != nil {
+		return condErr
+	}
 
 	// Apply OrderBy
 	if len(q.OrderBy) > 0 {
+		var sample Model
+		if factory != nil {
+			sample = factory()
+		} else if len(matched) > 0 {
+			sample = matched[0].model
+		}
+		if sample != nil {
+			for _, f := range sample.Schema() {
+				for _, order := range q.OrderBy {
+					if f.Name == order.Column() {
+						switch f.Type.Storage() {
+						case FieldBlob:
+							return fmt.Err("indexdb: order by blob column not supported")
+						}
+					}
+				}
+			}
+		}
+		for _, order := range q.OrderBy {
+			col := order.Column()
+			for _, item := range matched {
+				jsVal := item.val.Get(col)
+				if jsVal.Type() == js.TypeObject && !jsVal.IsNull() && !jsVal.Get("length").IsUndefined() {
+					return fmt.Err("indexdb: order by blob column not supported")
+				}
+			}
+		}
+
 		sort.Slice(matched, func(i, j int) bool {
 			for _, order := range q.OrderBy {
 				col := order.Column()
@@ -387,19 +537,25 @@ func mapResult(val js.Value, m Model) error {
 }
 
 // checkConditions checks a slice of conditions sequentially
-func checkConditions(val js.Value, conditions []storage.Condition) bool {
+func checkConditions(val js.Value, conditions []storage.Condition) (bool, error) {
 	if len(conditions) == 0 {
-		return true
+		return true, nil
 	}
 
 	cond := conditions[0]
 	fieldVal := val.Get(cond.Field())
-	match := checkCondition(fieldVal, cond)
+	match, err := checkCondition(fieldVal, cond)
+	if err != nil {
+		return false, err
+	}
 
 	for i := 1; i < len(conditions); i++ {
 		cond = conditions[i]
 		fieldVal = val.Get(cond.Field())
-		condMatch := checkCondition(fieldVal, cond)
+		condMatch, err := checkCondition(fieldVal, cond)
+		if err != nil {
+			return false, err
+		}
 		if cond.Logic() == "OR" {
 			match = match || condMatch
 		} else {
@@ -407,15 +563,44 @@ func checkConditions(val js.Value, conditions []storage.Condition) bool {
 		}
 	}
 
-	return match
+	return match, nil
 }
 
 // checkCondition checks if a JS value satisfies a condition
-func checkCondition(val js.Value, cond storage.Condition) bool {
-	// Simple type checking and comparison
-	// This needs to be robust for types (string, number, boolean)
+func checkCondition(val js.Value, cond storage.Condition) (bool, error) {
+	// A Uint8Array is an object, so scalar comparisons below cannot apply.
+	// Blobs support equality and inequality only — never <, >, LIKE or IN.
+	if val.Type() == js.TypeObject && !val.IsNull() {
+		lenProp := val.Get("length")
+		if !lenProp.IsUndefined() {
+			condVal := cond.Value()
+			var b2 []byte
+			switch cv := condVal.(type) {
+			case []byte:
+				b2 = cv
+			case nil:
+				b2 = nil
+			default:
+				return false, fmt.Err("indexdb: invalid condition value for blob column")
+			}
 
-	// Get Go value from JS value for comparison
+			n := lenProp.Int()
+			b1 := make([]byte, n)
+			if n > 0 {
+				js.CopyBytesToGo(b1, val)
+			}
+
+			switch cond.Operator() {
+			case "=":
+				return bytes.Equal(b1, b2), nil
+			case "!=":
+				return !bytes.Equal(b1, b2), nil
+			default:
+				return false, fmt.Err("indexdb: operator", cond.Operator(), "not supported on blob column")
+			}
+		}
+	}
+
 	var goVal any
 	switch val.Type() {
 	case js.TypeString:
@@ -425,92 +610,92 @@ func checkCondition(val js.Value, cond storage.Condition) bool {
 	case js.TypeBoolean:
 		goVal = val.Bool()
 	default:
-		return false // unknown type
+		return false, nil
 	}
 
 	condVal := cond.Value()
 
 	switch cond.Operator() {
 	case "=":
-		return compareAny(goVal, condVal)
+		return compareAny(goVal, condVal), nil
 	case "!=":
-		return !compareAny(goVal, condVal)
+		return !compareAny(goVal, condVal), nil
 	case "IN":
-		return valueInList(goVal, condVal)
+		return valueInList(goVal, condVal), nil
 	case "LIKE":
 		sVal, okS := goVal.(string)
 		patVal, okP := condVal.(string)
 		if okS && okP {
-			return matchLike(sVal, patVal)
+			return matchLike(sVal, patVal), nil
 		}
-		return false
+		return false, nil
 	case ">":
 		if v1, ok := goVal.(float64); ok {
 			if v2, ok := condVal.(float64); ok {
-				return v1 > v2
+				return v1 > v2, nil
 			}
 			if v2, ok := condVal.(int); ok {
-				return v1 > float64(v2)
+				return v1 > float64(v2), nil
 			}
 			if v2, ok := condVal.(int64); ok {
-				return v1 > float64(v2)
+				return v1 > float64(v2), nil
 			}
 		} else if v1, ok := goVal.(string); ok {
 			if v2, ok := condVal.(string); ok {
-				return v1 > v2
+				return v1 > v2, nil
 			}
 		}
 	case ">=":
 		if v1, ok := goVal.(float64); ok {
 			if v2, ok := condVal.(float64); ok {
-				return v1 >= v2
+				return v1 >= v2, nil
 			}
 			if v2, ok := condVal.(int); ok {
-				return v1 >= float64(v2)
+				return v1 >= float64(v2), nil
 			}
 			if v2, ok := condVal.(int64); ok {
-				return v1 >= float64(v2)
+				return v1 >= float64(v2), nil
 			}
 		} else if v1, ok := goVal.(string); ok {
 			if v2, ok := condVal.(string); ok {
-				return v1 >= v2
+				return v1 >= v2, nil
 			}
 		}
 	case "<":
 		if v1, ok := goVal.(float64); ok {
 			if v2, ok := condVal.(float64); ok {
-				return v1 < v2
+				return v1 < v2, nil
 			}
 			if v2, ok := condVal.(int); ok {
-				return v1 < float64(v2)
+				return v1 < float64(v2), nil
 			}
 			if v2, ok := condVal.(int64); ok {
-				return v1 < float64(v2)
+				return v1 < float64(v2), nil
 			}
 		} else if v1, ok := goVal.(string); ok {
 			if v2, ok := condVal.(string); ok {
-				return v1 < v2
+				return v1 < v2, nil
 			}
 		}
 	case "<=":
 		if v1, ok := goVal.(float64); ok {
 			if v2, ok := condVal.(float64); ok {
-				return v1 <= v2
+				return v1 <= v2, nil
 			}
 			if v2, ok := condVal.(int); ok {
-				return v1 <= float64(v2)
+				return v1 <= float64(v2), nil
 			}
 			if v2, ok := condVal.(int64); ok {
-				return v1 <= float64(v2)
+				return v1 <= float64(v2), nil
 			}
 		} else if v1, ok := goVal.(string); ok {
 			if v2, ok := condVal.(string); ok {
-				return v1 <= v2
+				return v1 <= v2, nil
 			}
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func compareAny(a, b any) bool {
