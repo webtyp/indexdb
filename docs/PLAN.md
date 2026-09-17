@@ -3,6 +3,8 @@ PLAN: "feat: columnas binarias (blob) y transacciones por lote"
 TAG: v0.2.0
 EXECUTOR: unassigned
 REVIEWER: none
+STATUS: running
+SESSION: 17791316637842426773
 ---
 
 > Parte del esfuerzo de búsqueda semántica nativa en el navegador. Índice maestro:
