@@ -323,6 +323,52 @@ func TestUnsupportedType_IsErrorNotPanic(t *testing.T) {
 	}
 }
 
+func TestBlob_ReadAllWithFactoryScansBlobColumn(t *testing.T) {
+	// ReadAll with a factory func() Model populates simpleRows.models during the cursor
+	// walk (via mapResult), and Scan() then has to copy from that model's own Pointers()
+	// into the caller's dest pointers. That copy is a second switch on the Go type,
+	// separate from the one mapResult uses — and it silently dropped *[]byte before this
+	// test existed, exactly the "blob column is skipped, destination keeps its old value"
+	// failure mode the master plan calls out for this function.
+	db := SetupDB(nil, "blob_readall_factory_test", &VectorItem{})
+
+	buf := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	item := VectorItem{ID: "1", Name: "factory", Vec: buf}
+	createQ := storage.Query{
+		Action:  storage.ActionCreate,
+		Table:   "vector_item",
+		Columns: []string{"ID", "Name", "Vec"},
+		Values:  []any{item.ID, item.Name, item.Vec},
+	}
+	if err := db.Exec("", createQ, &item); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	readAllQ := storage.Query{Action: storage.ActionReadAll, Table: "vector_item"}
+	rows, err := db.Query("", readAllQ, &VectorItem{}, func() Model { return &VectorItem{} })
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("Expected at least one row")
+	}
+
+	var id, name string
+	var vec []byte
+	if err := rows.Scan(&id, &name, &vec); err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	if id != "1" || name != "factory" {
+		t.Fatalf("Scan mismatch: got id=%q name=%q", id, name)
+	}
+	if !bytes.Equal(vec, buf) {
+		t.Fatalf("Scan did not populate blob column: got %v, want %v", vec, buf)
+	}
+}
+
 func TestTx_BatchInsertOneTransaction(t *testing.T) {
 	db := SetupDB(nil, "tx_batch_insert_test", &VectorItem{})
 

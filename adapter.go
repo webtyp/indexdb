@@ -126,8 +126,12 @@ func (r *simpleRows) Scan(dest ...any) error {
 				*d = *(srcPtr.(*float64))
 			case *bool:
 				*d = *(srcPtr.(*bool))
+			case *[]byte:
+				*d = *(srcPtr.(*[]byte))
 			case *any:
 				*d = *(srcPtr.(*any))
+			default:
+				return fmt.Err("indexdb: unsupported scan destination type", fmt.Sprintf("%T", destPtr))
 			}
 		}
 		return nil
