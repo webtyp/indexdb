@@ -126,8 +126,12 @@ func (r *simpleRows) Scan(dest ...any) error {
 				*d = *(srcPtr.(*float64))
 			case *bool:
 				*d = *(srcPtr.(*bool))
+			case *[]byte:
+				*d = *(srcPtr.(*[]byte))
 			case *any:
 				*d = *(srcPtr.(*any))
+			default:
+				return fmt.Err("indexdb: unsupported scan destination type", fmt.Sprintf("%T", destPtr))
 			}
 		}
 		return nil
@@ -164,6 +168,17 @@ func (r *simpleRows) Scan(dest ...any) error {
 			if p, ok := destPtr.(*bool); ok {
 				*p = jsVal.Bool()
 			}
+		case FieldBlob:
+			if p, ok := destPtr.(*[]byte); ok {
+				n := jsVal.Get("length").Int()
+				b := make([]byte, n)
+				if n > 0 {
+					js.CopyBytesToGo(b, jsVal)
+				}
+				*p = b
+			}
+		default:
+			return fmt.Err("indexdb: unsupported field type", field.Type.Storage().String(), "in column", field.Name)
 		}
 	}
 
@@ -438,4 +453,179 @@ func (d *adapter) getNewID() string {
 	return ""
 }
 
+type txBoundAdapter struct {
+	*adapter
+	tx   js.Value
+	done chan error
+}
+
+func (t *txBoundAdapter) getTxStore(table, mode string) (js.Value, error) {
+	return t.adapter.storeFrom(t.tx, table)
+}
+
+func (t *txBoundAdapter) Exec(query string, args ...any) error {
+	if len(args) == 0 {
+		return fmt.Err("no query passed")
+	}
+	q, ok := args[0].(storage.Query)
+	if !ok {
+		return fmt.Err("invalid query type")
+	}
+	if len(args) < 2 {
+		return fmt.Err("missing model argument")
+	}
+	m, ok := args[1].(Model)
+	if !ok {
+		return fmt.Err("invalid model type")
+	}
+
+	return t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
+}
+
+func (t *txBoundAdapter) QueryRow(query string, args ...any) storage.Scanner {
+	if len(args) == 0 {
+		return &simpleScanner{err: fmt.Err("no query passed")}
+	}
+	q, ok := args[0].(storage.Query)
+	if !ok {
+		return &simpleScanner{err: fmt.Err("invalid query type")}
+	}
+	if len(args) < 2 {
+		return &simpleScanner{err: fmt.Err("missing model argument")}
+	}
+	m, ok := args[1].(Model)
+	if !ok {
+		return &simpleScanner{err: fmt.Err("invalid model type")}
+	}
+
+	err := t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
+	return &simpleScanner{err: err}
+}
+
+func (t *txBoundAdapter) Query(query string, args ...any) (storage.Rows, error) {
+	if len(args) == 0 {
+		return nil, fmt.Err("no query passed")
+	}
+	q, ok := args[0].(storage.Query)
+	if !ok {
+		return nil, fmt.Err("invalid query type")
+	}
+	if len(args) < 2 {
+		return nil, fmt.Err("missing model argument")
+	}
+	m, ok := args[1].(Model)
+	if !ok {
+		return nil, fmt.Err("invalid model type")
+	}
+
+	var models []Model
+	var values []js.Value
+	var factory func() Model
+
+	if len(args) > 2 {
+		if f, ok := args[2].(func() Model); ok {
+			factory = f
+		}
+	}
+
+	var each func(Model)
+	var eachJS func(js.Value)
+
+	if factory != nil {
+		each = func(model Model) {
+			models = append(models, model)
+		}
+	} else {
+		eachJS = func(val js.Value) {
+			values = append(values, val)
+		}
+	}
+
+	err := t.executeWithStore(t.getTxStore, q, m, factory, each, eachJS)
+	if err != nil {
+		return nil, err
+	}
+
+	return &simpleRows{
+		models: models,
+		values: values,
+		fields: m.Schema(),
+		idx:    0,
+	}, nil
+}
+
+// BeginTx opens ONE IndexedDB transaction spanning every declared object store
+// and returns an executor bound to it. IndexedDB auto-commits a transaction as
+// soon as the event loop yields with no pending request, so the bound executor
+// must issue its requests back-to-back and must not await anything unrelated.
+func (d *adapter) BeginTx() (storage.TxBoundExecutor, error) {
+	if !d.db.Truthy() {
+		return nil, fmt.Err("Database not initialized")
+	}
+
+	storeNames := d.db.Get("objectStoreNames")
+	if !storeNames.Truthy() || storeNames.Get("length").Int() == 0 {
+		return nil, fmt.Err("No object stores found")
+	}
+
+	tx := d.db.Call("transaction", storeNames, "readwrite")
+	if !tx.Truthy() {
+		return nil, fmt.Err("Failed to create transaction")
+	}
+
+	txBound := &txBoundAdapter{
+		adapter: d,
+		tx:      tx,
+		done:    make(chan error, 1),
+	}
+
+	onComplete := js.FuncOf(func(this js.Value, args []js.Value) any {
+		select {
+		case txBound.done <- nil:
+		default:
+		}
+		return nil
+	})
+	onError := js.FuncOf(func(this js.Value, args []js.Value) any {
+		errVal := tx.Get("error")
+		errMsg := "transaction error"
+		if errVal.Truthy() {
+			errMsg = errVal.Get("message").String()
+		}
+		select {
+		case txBound.done <- fmt.Err("indexdb tx failed:", errMsg):
+		default:
+		}
+		return nil
+	})
+	onAbort := js.FuncOf(func(this js.Value, args []js.Value) any {
+		select {
+		case txBound.done <- fmt.Err("indexdb tx aborted"):
+		default:
+		}
+		return nil
+	})
+
+	tx.Call("addEventListener", "complete", onComplete)
+	tx.Call("addEventListener", "error", onError)
+	tx.Call("addEventListener", "abort", onAbort)
+
+	return txBound, nil
+}
+
+func (t *txBoundAdapter) Commit() error {
+	if commitFn := t.tx.Get("commit"); commitFn.Truthy() && !commitFn.IsUndefined() {
+		t.tx.Call("commit")
+	}
+	return <-t.done
+}
+
+func (t *txBoundAdapter) Rollback() error {
+	t.tx.Call("abort")
+	<-t.done
+	return nil
+}
+
 var _ storage.Conn = (*adapter)(nil)
+var _ storage.TxExecutor = (*adapter)(nil)
+var _ storage.TxBoundExecutor = (*txBoundAdapter)(nil)

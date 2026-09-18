@@ -65,6 +65,18 @@ func processCursorRequest(req js.Value, onNext func(cursor js.Value) bool) error
 	return err
 }
 
+// storeFrom resolves an object store from an active transaction.
+func (d *adapter) storeFrom(tx js.Value, table string) (js.Value, error) {
+	if !tx.Truthy() {
+		return js.Value{}, fmt.Err("Transaction not valid")
+	}
+	store := tx.Call("objectStore", table)
+	if !store.Truthy() {
+		return js.Value{}, fmt.Err("Failed to get object store for table", table)
+	}
+	return store, nil
+}
+
 // Transaction helper to start a transaction and get the object store.
 // mode should be "readonly" or "readwrite".
 func (d *adapter) getStore(tableName string, mode string) (js.Value, error) {
@@ -85,10 +97,5 @@ func (d *adapter) getStore(tableName string, mode string) (js.Value, error) {
 		return js.Value{}, fmt.Err("Failed to create transaction for table", tableName)
 	}
 
-	store := tx.Call("objectStore", tableName)
-	if !store.Truthy() {
-		return js.Value{}, fmt.Err("Failed to get object store for table", tableName)
-	}
-
-	return store, nil
+	return d.storeFrom(tx, tableName)
 }
