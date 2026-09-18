@@ -45,17 +45,57 @@ func (d *adapter) Exec(query string, args ...any) error {
 	return d.execute(q, m, nil, nil, nil)
 }
 
+// copyPointers copies each src[i] (a typed pointer, from a Model's own
+// Pointers()) into dest[i] (the caller's typed pointer, from Scan's variadic
+// args). It exists because a query's read path populates its own throwaway
+// Model instance internally (execute→mapResult, keyed off whatever Model was
+// threaded through Compile's Plan.Args) — Scan's job is getting that data into
+// the pointers the CALLER actually asked for, which are a different set.
+func copyPointers(dest, src []any) error {
+	if len(dest) != len(src) {
+		return fmt.Err("scan destination mismatch")
+	}
+	for i, srcPtr := range src {
+		destPtr := dest[i]
+		switch d := destPtr.(type) {
+		case *string:
+			*d = *(srcPtr.(*string))
+		case *int:
+			*d = *(srcPtr.(*int))
+		case *int64:
+			*d = *(srcPtr.(*int64))
+		case *float64:
+			*d = *(srcPtr.(*float64))
+		case *bool:
+			*d = *(srcPtr.(*bool))
+		case *[]byte:
+			*d = *(srcPtr.(*[]byte))
+		case *any:
+			*d = *(srcPtr.(*any))
+		default:
+			return fmt.Err("indexdb: unsupported scan destination type", fmt.Sprintf("%T", destPtr))
+		}
+	}
+	return nil
+}
+
 // simpleScanner implements storage.Scanner
 type simpleScanner struct {
-	err  error
-	ptrs []any
+	err error
+	m   Model // populated by execute() before Scan is called; nil on an error path
 }
 
 func (s *simpleScanner) Scan(dest ...any) error {
 	if s.err != nil {
 		return s.err
 	}
-	return nil
+	if len(dest) == 0 {
+		return nil // matches the "already scanned m by reference" calling style
+	}
+	if s.m == nil {
+		return fmt.Err("indexdb: Scan called on a result with no data")
+	}
+	return copyPointers(dest, s.m.Pointers())
 }
 
 // QueryRow implements storage.Executor
@@ -76,7 +116,7 @@ func (d *adapter) QueryRow(query string, args ...any) storage.Scanner {
 	}
 
 	err := d.execute(q, m, nil, nil, nil)
-	return &simpleScanner{err: err}
+	return &simpleScanner{err: err, m: m}
 }
 
 // simpleRows implements storage.Rows
@@ -106,35 +146,7 @@ func (r *simpleRows) Scan(dest ...any) error {
 
 	if len(r.models) > 0 {
 		m := r.models[r.idx-1]
-		ptrs := m.Pointers()
-		if len(ptrs) != len(dest) {
-			return fmt.Err("scan destination mismatch")
-		}
-
-		for i, p := range ptrs {
-			destPtr := dest[i]
-			srcPtr := p
-
-			switch d := destPtr.(type) {
-			case *string:
-				*d = *(srcPtr.(*string))
-			case *int:
-				*d = *(srcPtr.(*int))
-			case *int64:
-				*d = *(srcPtr.(*int64))
-			case *float64:
-				*d = *(srcPtr.(*float64))
-			case *bool:
-				*d = *(srcPtr.(*bool))
-			case *[]byte:
-				*d = *(srcPtr.(*[]byte))
-			case *any:
-				*d = *(srcPtr.(*any))
-			default:
-				return fmt.Err("indexdb: unsupported scan destination type", fmt.Sprintf("%T", destPtr))
-			}
-		}
-		return nil
+		return copyPointers(dest, m.Pointers())
 	}
 
 	val := r.values[r.idx-1]
@@ -150,7 +162,7 @@ func (r *simpleRows) Scan(dest ...any) error {
 
 		destPtr := dest[i]
 		switch field.Type.Storage() {
-		case FieldText:
+		case FieldText, FieldRaw:
 			if p, ok := destPtr.(*string); ok {
 				*p = jsVal.String()
 			}
@@ -455,8 +467,9 @@ func (d *adapter) getNewID() string {
 
 type txBoundAdapter struct {
 	*adapter
-	tx   js.Value
-	done chan error
+	tx       js.Value
+	done     chan error
+	finished bool // set once Commit or Rollback has actually run the JS call
 }
 
 func (t *txBoundAdapter) getTxStore(table, mode string) (js.Value, error) {
@@ -499,7 +512,7 @@ func (t *txBoundAdapter) QueryRow(query string, args ...any) storage.Scanner {
 	}
 
 	err := t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
-	return &simpleScanner{err: err}
+	return &simpleScanner{err: err, m: m}
 }
 
 func (t *txBoundAdapter) Query(query string, args ...any) (storage.Rows, error) {
@@ -613,14 +626,28 @@ func (d *adapter) BeginTx() (storage.TxBoundExecutor, error) {
 	return txBound, nil
 }
 
+// Commit is a no-op if the transaction already finished (storage.TxBoundExecutor).
 func (t *txBoundAdapter) Commit() error {
+	if t.finished {
+		return nil
+	}
+	t.finished = true
 	if commitFn := t.tx.Get("commit"); commitFn.Truthy() && !commitFn.IsUndefined() {
 		t.tx.Call("commit")
 	}
 	return <-t.done
 }
 
+// Rollback is a no-op if the transaction already finished (storage.TxBoundExecutor).
+// Without this check, `defer tx.Rollback()` right after a successful Commit — the
+// standard Go idiom, matching database/sql — calls tx.abort() on an IndexedDB
+// transaction that has already completed, which throws
+// "Failed to execute 'abort' on 'IDBTransaction': The transaction has finished."
 func (t *txBoundAdapter) Rollback() error {
+	if t.finished {
+		return nil
+	}
+	t.finished = true
 	t.tx.Call("abort")
 	<-t.done
 	return nil

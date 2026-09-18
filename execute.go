@@ -120,7 +120,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 			jsVal := val.Get(f.Name)
 			if !jsVal.IsUndefined() {
 				switch f.Type.Storage() {
-				case FieldText:
+				case FieldText, FieldRaw:
 					data.Set(f.Name, jsVal.String())
 				case FieldInt:
 					data.Set(f.Name, int64(jsVal.Int()))
@@ -197,7 +197,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 			jsVal := item.val.Get(f.Name)
 			if !jsVal.IsUndefined() {
 				switch f.Type.Storage() {
-				case FieldText:
+				case FieldText, FieldRaw:
 					data.Set(f.Name, jsVal.String())
 				case FieldInt:
 					data.Set(f.Name, int64(jsVal.Int()))

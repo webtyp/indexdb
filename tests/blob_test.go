@@ -461,6 +461,46 @@ func TestTx_RollbackDiscards(t *testing.T) {
 	}
 }
 
+// TestTx_RollbackAfterCommitIsSafe exercises the standard Go idiom
+// `defer tx.Rollback()` issued right after BeginTx, which still fires after a
+// successful Commit. storage.TxBoundExecutor documents this as required
+// (matching database/sql's Tx), and it used to panic here: Rollback called
+// tx.abort() unconditionally, which throws against a real IndexedDB
+// transaction that already completed. Found via webtyp/vectordb's Add(),
+// which writes exactly this pattern.
+func TestTx_RollbackAfterCommitIsSafe(t *testing.T) {
+	db := SetupDB(nil, "tx_rollback_after_commit_test", &VectorItem{})
+
+	txExec, ok := db.(storage.TxExecutor)
+	if !ok {
+		t.Fatal("db does not implement storage.TxExecutor")
+	}
+
+	tx, err := txExec.BeginTx()
+	if err != nil {
+		t.Fatalf("BeginTx failed: %v", err)
+	}
+	defer tx.Rollback() // must be safe even though Commit succeeds below
+
+	v := VectorItem{ID: "1", Name: "committed", Vec: []byte{0x01}}
+	q := storage.Query{
+		Action:  storage.ActionCreate,
+		Table:   "vector_item",
+		Columns: []string{"ID", "Name", "Vec"},
+		Values:  []any{v.ID, v.Name, v.Vec},
+	}
+	if err := tx.Exec("", q, &v); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	// The deferred Rollback() fires here, after Commit already succeeded.
+	// It must return cleanly and must not touch what was committed.
+}
+
 func TestTx_LargeShardBlob(t *testing.T) {
 	db := SetupDB(nil, "tx_large_shard_test", &VectorItem{})
 
