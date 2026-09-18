@@ -3,8 +3,9 @@ PLAN: "feat: columnas binarias (blob) y transacciones por lote"
 TAG: v0.2.0
 EXECUTOR: unassigned
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 17791316637842426773
+PR: https://github.com/webtyp/indexdb/pull/17
 ---
 
 > Parte del esfuerzo de búsqueda semántica nativa en el navegador. Índice maestro:
