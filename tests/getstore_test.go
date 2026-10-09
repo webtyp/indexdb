@@ -10,7 +10,7 @@ import (
 )
 
 func TestGetStore_ExistingTable_Succeeds(t *testing.T) {
-	db := SetupDB(nil, "test_getstore_existing", &User{})
+	db := SetupDB(t, "test_getstore_existing", &User{})
 	defer db.Close()
 
 	query := storage.Query{
@@ -25,7 +25,7 @@ func TestGetStore_ExistingTable_Succeeds(t *testing.T) {
 }
 
 func TestGetStore_MissingTable_ReturnsError(t *testing.T) {
-	db := SetupDB(nil, "test_getstore_missing", &User{})
+	db := SetupDB(t, "test_getstore_missing", &User{})
 	defer db.Close()
 
 	query := storage.Query{

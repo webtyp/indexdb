@@ -3,8 +3,9 @@ PLAN: "feat!: typed New(name, models...) (storage.Conn, error) — no IDGenerato
 TAG: v0.7.0
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 8588713815250406477
+PR: https://github.com/webtyp/indexdb/pull/18
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
@@ -152,3 +153,6 @@ upgrade rule (additive, automatic, the "blocked" error), and an "I want X → us
 
 **Known downstream consumer** (not this plan's job): `webtyp/vectordb`'s
 `vectordb_indexdb_test.go` calls the old signature; it is updated when vectordb bumps.
+
+## Executor notes
+The entire plan was successfully executed. The schema upgrade was implemented, all tests were updated to support the new `New` signature, the new error checks were implemented in `adapter.go`, and the documentation in `README.md` was rewritten to match.

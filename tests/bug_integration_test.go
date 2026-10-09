@@ -67,21 +67,28 @@ func (m *NumericPK) IsNil() bool                 { return m == nil }
 func TestBugScenario(t *testing.T) {
 	t.Run("MultipleInitialization", func(t *testing.T) {
 		dbName := "multi_init_test"
-		db1 := indexdb.New(dbName, nil, nil, &SimpleUser{})
+		db1, err := indexdb.New(dbName, &SimpleUser{})
+		if err != nil {
+			t.Fatal(err)
+		}
 		_ = db1
 
 		// Initialize again
-		db2 := indexdb.New(dbName, nil, nil, &SimpleUser{})
-		if db2 == nil {
-			t.Fatal("Second initialization failed")
+		db2, err := indexdb.New(dbName, &SimpleUser{})
+		if err != nil {
+			t.Fatal("Second initialization failed", err)
 		}
+		_ = db2
 	})
 
 	t.Run("WaitForSuccess", func(t *testing.T) {
 		dbName := "wait_success_test"
 		// This test is implicit because New blocks until initDone is closed.
 		// If it doesn't block, subsequent operations would fail.
-		db := indexdb.New(dbName, nil, nil, &SimpleUser{})
+		db, err := indexdb.New(dbName, &SimpleUser{})
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		user := SimpleUser{ID: "u1", Email: "u1@test.com"}
 		query := storage.Query{
@@ -90,14 +97,14 @@ func TestBugScenario(t *testing.T) {
 			Columns: []string{"ID", "Email"},
 			Values:  []any{user.ID, user.Email},
 		}
-		err := db.Exec("", query, &user)
+		err = db.Exec("", query, &user)
 		if err != nil {
 			t.Fatalf("Operation immediately after InitDB failed: %v", err)
 		}
 	})
 
 	t.Run("TextPK", func(t *testing.T) {
-		db := SetupDB(nil, "text_pk_test", &SimpleUser{})
+		db := SetupDB(t, "text_pk_test", &SimpleUser{})
 		u := SimpleUser{ID: "alice", Email: "alice@test.com"}
 
 		query := storage.Query{
@@ -126,7 +133,7 @@ func TestBugScenario(t *testing.T) {
 	})
 
 	t.Run("NumericPK", func(t *testing.T) {
-		db := SetupDB(nil, "numeric_pk_test", &NumericPK{})
+		db := SetupDB(t, "numeric_pk_test", &NumericPK{})
 		n := NumericPK{ID: 123, Value: "test"}
 
 		query := storage.Query{
@@ -155,7 +162,7 @@ func TestBugScenario(t *testing.T) {
 	})
 
 	t.Run("TableNotFound", func(t *testing.T) {
-		db := SetupDB(nil, "table_not_found_test", &SimpleUser{})
+		db := SetupDB(t, "table_not_found_test", &SimpleUser{})
 
 		var session SimpleSession
 		readQuery := storage.Query{
@@ -170,7 +177,7 @@ func TestBugScenario(t *testing.T) {
 	})
 
 	t.Run("CursorConcurrency", func(t *testing.T) {
-		db := SetupDB(nil, "concurrency_test", &SimpleUser{})
+		db := SetupDB(t, "concurrency_test", &SimpleUser{})
 
 		// Seed some data
 		for i := 0; i < 10; i++ {
@@ -200,7 +207,7 @@ func TestBugScenario(t *testing.T) {
 	})
 
 	t.Run("EmptyResult", func(t *testing.T) {
-		db := SetupDB(nil, "empty_result_test", &SimpleUser{})
+		db := SetupDB(t, "empty_result_test", &SimpleUser{})
 
 		var u SimpleUser
 		readQuery := storage.Query{

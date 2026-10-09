@@ -9,7 +9,7 @@ import (
 )
 
 func TestExecuteActionNotImplemented(t *testing.T) {
-	db := SetupDB(nil, "action_not_implemented_test", &User{})
+	db := SetupDB(t, "action_not_implemented_test", &User{})
 
 	err := db.Exec("", storage.Query{Action: 999}, &User{})
 	if err == nil {
@@ -18,7 +18,7 @@ func TestExecuteActionNotImplemented(t *testing.T) {
 }
 
 func TestActionsOnMissingTable(t *testing.T) {
-	db := SetupDB(nil, "missing_table_actions_test", &User{})
+	db := SetupDB(t, "missing_table_actions_test", &User{})
 
 	cases := []struct {
 		name  string
@@ -53,7 +53,7 @@ func TestActionsOnMissingTable(t *testing.T) {
 }
 
 func TestConnMisuseErrors(t *testing.T) {
-	db := SetupDB(nil, "conn_misuse_test", &User{})
+	db := SetupDB(t, "conn_misuse_test", &User{})
 
 	if _, err := db.Query("", storage.Query{}); err == nil {
 		t.Fatal("Expected error on invalid args to Query (missing model)")

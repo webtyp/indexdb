@@ -50,7 +50,7 @@ func (u *UnsupportedItem) DecodeFields(r FieldReader)  {}
 func (u *UnsupportedItem) IsNil() bool                 { return u == nil }
 
 func TestBlob_RoundTripExact(t *testing.T) {
-	db := SetupDB(nil, "blob_roundtrip_test", &VectorItem{})
+	db := SetupDB(t, "blob_roundtrip_test", &VectorItem{})
 
 	buf := make([]byte, 1536)
 	for i := range buf {
@@ -92,7 +92,7 @@ func TestBlob_RoundTripExact(t *testing.T) {
 }
 
 func TestBlob_EmptyAndNil(t *testing.T) {
-	db := SetupDB(nil, "blob_empty_nil_test", &VectorItem{})
+	db := SetupDB(t, "blob_empty_nil_test", &VectorItem{})
 
 	item1 := VectorItem{ID: "empty", Name: "empty", Vec: []byte{}}
 	q1 := storage.Query{
@@ -144,7 +144,7 @@ func TestBlob_EmptyAndNil(t *testing.T) {
 }
 
 func TestBlob_UpdateOtherColumnPreservesBlob(t *testing.T) {
-	db := SetupDB(nil, "blob_update_preserve_test", &VectorItem{})
+	db := SetupDB(t, "blob_update_preserve_test", &VectorItem{})
 
 	buf := make([]byte, 1536)
 	for i := range buf {
@@ -192,7 +192,7 @@ func TestBlob_UpdateOtherColumnPreservesBlob(t *testing.T) {
 }
 
 func TestBlob_UpdateReplacesBytes(t *testing.T) {
-	db := SetupDB(nil, "blob_update_replace_test", &VectorItem{})
+	db := SetupDB(t, "blob_update_replace_test", &VectorItem{})
 
 	buf1 := make([]byte, 1536)
 	for i := range buf1 {
@@ -242,7 +242,7 @@ func TestBlob_UpdateReplacesBytes(t *testing.T) {
 }
 
 func TestBlob_EqCondition(t *testing.T) {
-	db := SetupDB(nil, "blob_eq_cond_test", &VectorItem{})
+	db := SetupDB(t, "blob_eq_cond_test", &VectorItem{})
 
 	buf1 := []byte{0x01, 0x02, 0x03}
 	buf2 := []byte{0x04, 0x05, 0x06}
@@ -285,7 +285,7 @@ func TestBlob_EqCondition(t *testing.T) {
 }
 
 func TestBlob_OrderByBlobIsError(t *testing.T) {
-	db := SetupDB(nil, "blob_orderby_err_test", &VectorItem{})
+	db := SetupDB(t, "blob_orderby_err_test", &VectorItem{})
 
 	item := VectorItem{ID: "1", Name: "one", Vec: []byte{0x01}}
 	createQ := storage.Query{
@@ -308,7 +308,7 @@ func TestBlob_OrderByBlobIsError(t *testing.T) {
 }
 
 func TestUnsupportedType_IsErrorNotPanic(t *testing.T) {
-	db := SetupDB(nil, "unsupported_type_test", &UnsupportedItem{})
+	db := SetupDB(t, "unsupported_type_test", &UnsupportedItem{})
 
 	item := UnsupportedItem{ID: "1", Nums: []int{1, 2, 3}}
 	createQ := storage.Query{
@@ -330,7 +330,7 @@ func TestBlob_ReadAllWithFactoryScansBlobColumn(t *testing.T) {
 	// separate from the one mapResult uses — and it silently dropped *[]byte before this
 	// test existed, exactly the "blob column is skipped, destination keeps its old value"
 	// failure mode the master plan calls out for this function.
-	db := SetupDB(nil, "blob_readall_factory_test", &VectorItem{})
+	db := SetupDB(t, "blob_readall_factory_test", &VectorItem{})
 
 	buf := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	item := VectorItem{ID: "1", Name: "factory", Vec: buf}
@@ -370,7 +370,7 @@ func TestBlob_ReadAllWithFactoryScansBlobColumn(t *testing.T) {
 }
 
 func TestTx_BatchInsertOneTransaction(t *testing.T) {
-	db := SetupDB(nil, "tx_batch_insert_test", &VectorItem{})
+	db := SetupDB(t, "tx_batch_insert_test", &VectorItem{})
 
 	txExec, ok := db.(storage.TxExecutor)
 	if !ok {
@@ -416,7 +416,7 @@ func TestTx_BatchInsertOneTransaction(t *testing.T) {
 }
 
 func TestTx_RollbackDiscards(t *testing.T) {
-	db := SetupDB(nil, "tx_rollback_test", &VectorItem{})
+	db := SetupDB(t, "tx_rollback_test", &VectorItem{})
 
 	txExec, ok := db.(storage.TxExecutor)
 	if !ok {
@@ -469,7 +469,7 @@ func TestTx_RollbackDiscards(t *testing.T) {
 // transaction that already completed. Found via webtyp/vectordb's Add(),
 // which writes exactly this pattern.
 func TestTx_RollbackAfterCommitIsSafe(t *testing.T) {
-	db := SetupDB(nil, "tx_rollback_after_commit_test", &VectorItem{})
+	db := SetupDB(t, "tx_rollback_after_commit_test", &VectorItem{})
 
 	txExec, ok := db.(storage.TxExecutor)
 	if !ok {
@@ -502,7 +502,7 @@ func TestTx_RollbackAfterCommitIsSafe(t *testing.T) {
 }
 
 func TestTx_LargeShardBlob(t *testing.T) {
-	db := SetupDB(nil, "tx_large_shard_test", &VectorItem{})
+	db := SetupDB(t, "tx_large_shard_test", &VectorItem{})
 
 	largeBuf := make([]byte, 4*1024*1024)
 	for i := range largeBuf {
