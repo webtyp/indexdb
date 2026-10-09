@@ -18,7 +18,10 @@ func (e dbError) Error() string {
 }
 
 const (
-	errZeroModels = dbError("indexdb: New requires at least one model")
+	errZeroModels      = dbError("indexdb: New requires at least one model")
+	errUpgradeBlocked  = dbError("indexdb: upgrade blocked by another open tab of this app; close it and reload")
+	errOpen            = dbError("indexdb: database open error")
+	duplicateModelText = "indexdb: duplicate model name "
 )
 
 type adapter struct {
@@ -299,7 +302,7 @@ func (d *adapter) Compile(q storage.Query, m Model) (storage.Plan, error) {
 }
 
 func errDuplicateModel(name string) error {
-	return fmt.Err(string(dbError("indexdb: duplicate model name " + name)))
+	return dbError(duplicateModelText + name)
 }
 
 // New initializes the IndexedDB database and returns a storage.Conn instance.
@@ -308,13 +311,14 @@ func New(name string, models ...Model) (storage.Conn, error) {
 		return nil, errZeroModels
 	}
 
-	seen := make(map[string]bool)
-	for _, m := range models {
-		mName := m.ModelName()
-		if seen[mName] {
-			return nil, errDuplicateModel(mName)
+	// Nested scan, no map: TinyGo's map runtime bloats the wasm binary, and a schema holds a
+	// handful of models.
+	for i, m := range models {
+		for _, prev := range models[:i] {
+			if prev.ModelName() == m.ModelName() {
+				return nil, errDuplicateModel(m.ModelName())
+			}
 		}
-		seen[mName] = true
 	}
 
 	adapter := newAdapter(name)
@@ -338,13 +342,13 @@ func (d *adapter) initialize(structTables ...Model) error {
 	var errResult error
 
 	onBlocked := js.FuncOf(func(this js.Value, p []js.Value) any {
-		errResult = fmt.Err("indexdb: upgrade blocked by another open tab of this app; close it and reload")
+		errResult = errUpgradeBlocked
 		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
 		return nil
 	})
 
 	onError := js.FuncOf(func(this js.Value, p []js.Value) any {
-		errResult = fmt.Err("indexdb: database open error")
+		errResult = errOpen
 		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
 		return nil
 	})
@@ -353,7 +357,9 @@ func (d *adapter) initialize(structTables ...Model) error {
 		// First creation
 		d.db = p[0].Get("target").Get("result")
 		for _, m := range d.tables {
-			_ = d.createTable(m)
+			if err := d.createTable(m); err != nil && errResult == nil {
+				errResult = err
+			}
 		}
 		return nil
 	})
@@ -382,14 +388,14 @@ func (d *adapter) initialize(structTables ...Model) error {
 			reqUpgrade := js.Global().Get("indexedDB").Call("open", d.dbName, ver+1)
 
 			onUpgradeBlocked := js.FuncOf(func(this js.Value, p []js.Value) any {
-				errResult = fmt.Err("indexdb: upgrade blocked by another open tab of this app; close it and reload")
+				errResult = errUpgradeBlocked
 				d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
 				return nil
 			})
 			reqUpgrade.Set("onblocked", onUpgradeBlocked)
 
 			onUpgradeError := js.FuncOf(func(this js.Value, p []js.Value) any {
-				errResult = fmt.Err("indexdb: database open error")
+				errResult = errOpen
 				d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
 				return nil
 			})
@@ -400,7 +406,9 @@ func (d *adapter) initialize(structTables ...Model) error {
 				storeNames := d.db.Get("objectStoreNames")
 				for _, m := range d.tables {
 					if !d.tableExistInNames(storeNames, m.ModelName()) {
-						_ = d.createTable(m)
+						if err := d.createTable(m); err != nil && errResult == nil {
+							errResult = err
+						}
 					}
 				}
 				return nil
@@ -442,15 +450,6 @@ func (d *adapter) tableExistInNames(names js.Value, name string) bool {
 		}
 	}
 	return false
-}
-
-func (d *adapter) open(p *js.Value, message string) error {
-	d.db = p.Get("target").Get("result")
-
-	if !d.db.Truthy() {
-		return fmt.Err("error open", d.dbName, message)
-	}
-	return nil
 }
 
 // createTable creates an IndexedDB object store from the model's Schema.
