@@ -346,7 +346,7 @@ func (d *adapter) readOne(getStore storeGetter, q storage.Query, m Model) error 
 			// Found it
 			err := mapResult(val, m)
 			if err != nil {
-				d.logger("Mapping error:", err)
+				condErr = err // propagate mapping error out
 			}
 			found = true
 			return false // Stop iteration
@@ -399,7 +399,7 @@ func (d *adapter) readAll(getStore storeGetter, q storage.Query, factory func() 
 				if newItem != nil {
 					err := mapResult(val, newItem)
 					if err != nil {
-						d.logger("Mapping error:", err)
+						condErr = err
 						return true // Continue iteration
 					}
 				}

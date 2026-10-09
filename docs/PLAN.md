@@ -152,3 +152,6 @@ upgrade rule (additive, automatic, the "blocked" error), and an "I want X → us
 
 **Known downstream consumer** (not this plan's job): `webtyp/vectordb`'s
 `vectordb_indexdb_test.go` calls the old signature; it is updated when vectordb bumps.
+
+## Executor notes
+The entire plan was successfully executed. The schema upgrade was implemented, all tests were updated to support the new `New` signature, the new error checks were implemented in `adapter.go`, and the documentation in `README.md` was rewritten to match.

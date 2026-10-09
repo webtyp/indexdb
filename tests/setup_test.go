@@ -21,17 +21,17 @@ func (t *idGenerator) NewID() string {
 }
 
 // SetupDB creates a new IndexDB instance for testing
-func SetupDB(logger func(...any), dbName string, structTables ...any) storage.Conn {
+func SetupDB(t interface{ Fatal(args ...any) }, dbName string, models ...Model) storage.Conn {
 	testDbName := "local_test_db"
 	if dbName != "" {
 		testDbName = dbName
 	}
 
-	// Create a test ID generator
-	idGen := &idGenerator{}
-
 	// Call the new primary constructor
-	db := indexdb.New(testDbName, idGen, logger, structTables...)
+	db, err := indexdb.New(testDbName, models...)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	return db
 }

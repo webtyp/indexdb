@@ -11,12 +11,20 @@ import (
 	"webtyp.com/storage"
 )
 
+type dbError string
+
+func (e dbError) Error() string {
+	return string(e)
+}
+
+const (
+	errZeroModels = dbError("indexdb: New requires at least one model")
+)
+
 type adapter struct {
 	dbName string
 	db     js.Value
-	tables []any
-	logger func(...any)
-	idGen  IDGenerator
+	tables []Model
 
 	compiler *compiler
 
@@ -270,16 +278,10 @@ func (d *adapter) Close() error {
 }
 
 // newAdapter creates a new adapter.
-func newAdapter(dbName string, idg IDGenerator, logger func(...any)) *adapter {
-	if logger == nil {
-		logger = func(args ...any) {}
-	}
-
+func newAdapter(dbName string) *adapter {
 	return &adapter{
 		dbName:   dbName,
 		db:       js.Value{},
-		idGen:    idg,
-		logger:   logger,
 		initDone: make(chan struct{}),
 	}
 }
@@ -296,28 +298,150 @@ func (d *adapter) Compile(q storage.Query, m Model) (storage.Plan, error) {
 	return d.compiler.Compile(q, m)
 }
 
+func errDuplicateModel(name string) error {
+	return fmt.Err(string(dbError("indexdb: duplicate model name " + name)))
+}
+
 // New initializes the IndexedDB database and returns a storage.Conn instance.
-func New(dbName string, idg IDGenerator, logger func(...any), structTables ...any) storage.Conn {
-	adapter := newAdapter(dbName, idg, logger)
+func New(name string, models ...Model) (storage.Conn, error) {
+	if len(models) == 0 {
+		return nil, errZeroModels
+	}
+
+	seen := make(map[string]bool)
+	for _, m := range models {
+		mName := m.ModelName()
+		if seen[mName] {
+			return nil, errDuplicateModel(mName)
+		}
+		seen[mName] = true
+	}
+
+	adapter := newAdapter(name)
 	adapter.compiler = &compiler{}
-	adapter.initialize(structTables...)
-	return adapter
+	err := adapter.initialize(models...)
+	if err != nil {
+		return nil, err
+	}
+	return adapter, nil
 }
 
 // initialize initializes the IndexedDB database and creates object stores based on the provided structs.
-func (d *adapter) initialize(structTables ...any) {
+func (d *adapter) initialize(structTables ...Model) error {
 	d.tables = structTables
 
-	// Open connection to IndexedDB
+	d.initDone = make(chan struct{})
+
+	// Open connection to IndexedDB without version
 	req := js.Global().Get("indexedDB").Call("open", d.dbName)
 
+	var errResult error
+
+	onBlocked := js.FuncOf(func(this js.Value, p []js.Value) any {
+		errResult = fmt.Err("indexdb: upgrade blocked by another open tab of this app; close it and reload")
+		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+		return nil
+	})
+
+	onError := js.FuncOf(func(this js.Value, p []js.Value) any {
+		errResult = fmt.Err("indexdb: database open error")
+		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+		return nil
+	})
+
+	onUpgradeNeeded := js.FuncOf(func(this js.Value, p []js.Value) any {
+		// First creation
+		d.db = p[0].Get("target").Get("result")
+		for _, m := range d.tables {
+			_ = d.createTable(m)
+		}
+		return nil
+	})
+
+	onSuccess := js.FuncOf(func(this js.Value, p []js.Value) any {
+		d.db = p[0].Get("target").Get("result")
+		d.db.Set("onversionchange", js.FuncOf(func(this js.Value, args []js.Value) any {
+			d.db.Call("close")
+			return nil
+		}))
+
+		missingStores := false
+		storeNames := d.db.Get("objectStoreNames")
+		for _, m := range d.tables {
+			if !d.tableExistInNames(storeNames, m.ModelName()) {
+				missingStores = true
+				break
+			}
+		}
+
+		if missingStores {
+			ver := d.db.Get("version").Int()
+			d.db.Call("close")
+
+			// reopen with ver+1
+			reqUpgrade := js.Global().Get("indexedDB").Call("open", d.dbName, ver+1)
+
+			onUpgradeBlocked := js.FuncOf(func(this js.Value, p []js.Value) any {
+				errResult = fmt.Err("indexdb: upgrade blocked by another open tab of this app; close it and reload")
+				d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+				return nil
+			})
+			reqUpgrade.Set("onblocked", onUpgradeBlocked)
+
+			onUpgradeError := js.FuncOf(func(this js.Value, p []js.Value) any {
+				errResult = fmt.Err("indexdb: database open error")
+				d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+				return nil
+			})
+			reqUpgrade.Set("onerror", onUpgradeError)
+
+			reqUpgrade.Set("onupgradeneeded", js.FuncOf(func(this js.Value, p []js.Value) any {
+				d.db = p[0].Get("target").Get("result")
+				storeNames := d.db.Get("objectStoreNames")
+				for _, m := range d.tables {
+					if !d.tableExistInNames(storeNames, m.ModelName()) {
+						_ = d.createTable(m)
+					}
+				}
+				return nil
+			}))
+
+			reqUpgrade.Set("onsuccess", js.FuncOf(func(this js.Value, p []js.Value) any {
+				d.db = p[0].Get("target").Get("result")
+				d.db.Set("onversionchange", js.FuncOf(func(this js.Value, args []js.Value) any {
+					d.db.Call("close")
+					return nil
+				}))
+				d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+				return nil
+			}))
+		} else {
+			d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
+		}
+
+		return nil
+	})
+
 	// Add event listeners
-	req.Call("addEventListener", "error", js.FuncOf(d.onShowDbError))
-	req.Call("addEventListener", "success", js.FuncOf(d.onOpenExistingDB))
-	req.Call("addEventListener", "upgradeneeded", js.FuncOf(d.onUpgradeNeeded))
+	req.Set("onblocked", onBlocked)
+	req.Set("onerror", onError)
+	req.Set("onsuccess", onSuccess)
+	req.Set("onupgradeneeded", onUpgradeNeeded)
 
 	// Wait until init is done
 	<-d.initDone
+
+	return errResult
+}
+
+func (d *adapter) tableExistInNames(names js.Value, name string) bool {
+	l := names.Length()
+	for i := 0; i < l; i++ {
+		if names.Index(i).String() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *adapter) open(p *js.Value, message string) error {
@@ -326,71 +450,6 @@ func (d *adapter) open(p *js.Value, message string) error {
 	if !d.db.Truthy() {
 		return fmt.Err("error open", d.dbName, message)
 	}
-	return nil
-}
-
-func (d *adapter) onUpgradeNeeded(this js.Value, p []js.Value) any {
-	// The event is fired on the request object, so 'this' is the request.
-	// p[0] is the event object.
-
-	// We need to set d.db before creating tables, as the connection is opened in upgrade needed transaction
-	err := d.open(&p[0], "upgradeneeded")
-	if err != nil {
-		d.logger(err)
-		return nil
-	}
-
-	for i, table := range d.tables {
-		m, ok := table.(Model)
-		if !ok {
-			d.logger("table", i, "does not implement Model interface, skipping")
-			continue
-		}
-
-		err := d.createTable(m)
-		if err != nil {
-			d.logger(err)
-			continue
-		}
-	}
-
-	// Wait for the version change transaction to complete
-	transaction := p[0].Get("target").Get("transaction")
-	transaction.Call("addEventListener", "complete", js.FuncOf(func(this js.Value, p []js.Value) any {
-		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
-		return nil
-	}))
-	transaction.Call("addEventListener", "error", js.FuncOf(func(this js.Value, p []js.Value) any {
-		d.logger("version change transaction error")
-		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
-		return nil
-	}))
-	transaction.Call("addEventListener", "abort", js.FuncOf(func(this js.Value, p []js.Value) any {
-		d.logger("version change transaction aborted")
-		d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
-		return nil
-	}))
-
-	return nil
-}
-
-func (d *adapter) onShowDbError(this js.Value, p []js.Value) any {
-	d.logger("indexDB Error", p[0])
-	return nil
-}
-
-func (d *adapter) onOpenExistingDB(this js.Value, p []js.Value) any {
-	err := d.open(&p[0], "OPEN")
-	if err != nil {
-		d.logger("open existing db error:", err)
-		return nil
-	}
-
-	if !d.initCompleted {
-		d.logger("open existing db success")
-	}
-
-	d.initOnce.Do(func() { d.initCompleted = true; close(d.initDone) })
 	return nil
 }
 
@@ -455,14 +514,6 @@ func (d *adapter) tableExist(tableName string) bool {
 	}
 
 	return false
-}
-
-// getNewID helper to access the ID generator
-func (d *adapter) getNewID() string {
-	if d.idGen != nil {
-		return d.idGen.NewID()
-	}
-	return ""
 }
 
 type txBoundAdapter struct {

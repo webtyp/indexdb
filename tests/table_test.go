@@ -13,7 +13,7 @@ import (
 func TestIndexDBCrudOperations(t *testing.T) {
 
 	// Setup the database with tables
-	db := SetupDB(nil, "crud_operations_test", &User{}, &Product{})
+	db := SetupDB(t, "crud_operations_test", &User{}, &Product{})
 
 	userOne := User{Name: "Alice", Email: "alice@example.com"}
 	userOne.ID = "1" // Manually assigning simple ID for test
@@ -177,14 +177,14 @@ func TestIndexDBCrudOperations(t *testing.T) {
 
 // Test close execution branch
 func TestCloseDb(t *testing.T) {
-	db := SetupDB(nil, "close_db", &User{})
+	db := SetupDB(t, "close_db", &User{})
 	_ = db.Close()
 	// Should not panic
 }
 
 // Extra ReadAll edge cases
 func TestReadAllEdgeCases(t *testing.T) {
-	db := SetupDB(nil, "readall_edge", &User{})
+	db := SetupDB(t, "readall_edge", &User{})
 
 	user := User{ID: "edge1", Name: "Edge1"}
 	query := storage.Query{
