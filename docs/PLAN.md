@@ -3,8 +3,9 @@ PLAN: "feat!: typed New(name, models...) (storage.Conn, error) — no IDGenerato
 TAG: v0.7.0
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 8588713815250406477
+PR: https://github.com/webtyp/indexdb/pull/18
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
