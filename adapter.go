@@ -167,11 +167,15 @@ func (r *simpleRows) Scan(dest ...any) error {
 
 	for i, field := range r.fields {
 		jsVal := val.Get(field.Name)
-		if jsVal.IsUndefined() {
+		destPtr := dest[i]
+		if jsVal.IsUndefined() || jsVal.IsNull() {
+			// storage contract: a missing value scans as the Go zero value, never the previous row's
+			if err := storage.ScanAny(nil, destPtr); err != nil {
+				return err
+			}
 			continue
 		}
 
-		destPtr := dest[i]
 		switch field.Type.Storage() {
 		case FieldText, FieldRaw:
 			if p, ok := destPtr.(*string); ok {

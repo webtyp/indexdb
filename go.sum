@@ -6,5 +6,5 @@ webtyp.com/jsvalue v0.1.6 h1:SegmAO9FRc/A7zZzVVtwi8ylqse6vwrCSSSNPq6XPy0=
 webtyp.com/jsvalue v0.1.6/go.mod h1:EZjDHh5THDAhIwAV3OvsTFRI6KdSjXiuSfT6p662Zpw=
 webtyp.com/model v0.2.12 h1:/6l/OqNjompAqLC2yH/YLdtQXIt2vYGJ9NoPjScvuYs=
 webtyp.com/model v0.2.12/go.mod h1:OkyYeE3GOG8eAQGhd9wVsORAhr+xYj3q8avpoGXG25c=
-webtyp.com/storage v0.0.7 h1:L9zRLTdj/vzBvEefedRi8vFpllegY+GpdcbA/zKbTZE=
-webtyp.com/storage v0.0.7/go.mod h1:CjNQUZR19Rczs5G8BO886jYKWf5LBNyJKVK7oostqpQ=
+webtyp.com/storage v0.1.18 h1:2l8jcY5mic8sSWKT76UEvqhC3ffTZQERpyIcmuqaDpA=
+webtyp.com/storage v0.1.18/go.mod h1:yJ/FUhWqroe+5J9JFlZdAwCOa99SXJ1wS/H/PZw64tU=

@@ -525,7 +525,11 @@ func mapResult(val js.Value, m Model) error {
 
 	for i, field := range fields {
 		jsVal := val.Get(field.Name)
-		if jsVal.IsUndefined() {
+		if jsVal.IsUndefined() || jsVal.IsNull() {
+			// storage contract: a missing value scans as the Go zero value, never what the model held before
+			if err := storage.ScanAny(nil, ptrs[i]); err != nil {
+				return err
+			}
 			continue
 		}
 
