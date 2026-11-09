@@ -97,7 +97,7 @@ func TestBugScenario(t *testing.T) {
 			Columns: []string{"ID", "Email"},
 			Values:  []any{user.ID, user.Email},
 		}
-		err = db.Exec("", query, &user)
+		_, err = db.Exec("", query, &user)
 		if err != nil {
 			t.Fatalf("Operation immediately after InitDB failed: %v", err)
 		}
@@ -113,7 +113,7 @@ func TestBugScenario(t *testing.T) {
 			Columns: []string{"ID", "Email"},
 			Values:  []any{u.ID, u.Email},
 		}
-		if err := db.Exec("", query, &u); err != nil {
+		if _, err := db.Exec("", query, &u); err != nil {
 			t.Fatalf("Create failed: %v", err)
 		}
 
@@ -142,7 +142,7 @@ func TestBugScenario(t *testing.T) {
 			Columns: []string{"ID", "Value"},
 			Values:  []any{n.ID, n.Value},
 		}
-		if err := db.Exec("", query, &n); err != nil {
+		if _, err := db.Exec("", query, &n); err != nil {
 			t.Fatalf("Create failed: %v", err)
 		}
 
@@ -188,7 +188,7 @@ func TestBugScenario(t *testing.T) {
 				Columns: []string{"ID", "Email"},
 				Values:  []any{u.ID, u.Email},
 			}
-			_ = db.Exec("", query, &u)
+			_, _ = db.Exec("", query, &u)
 		}
 
 		// Sequential rapid queries

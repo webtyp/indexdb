@@ -15,9 +15,15 @@ import (
 	"webtyp.com/storage"
 )
 
+// What IndexedDB reports when a key or a unique index is violated; an error that contains either is a storage.Duplicate.
+const (
+	jsConstraintError = "ConstraintError"
+	jsKeyExists       = "Key already exists"
+)
+
 type storeGetter func(table, mode string) (js.Value, error)
 
-func (d *adapter) executeWithStore(getStore storeGetter, q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) error {
+func (d *adapter) executeWithStore(getStore storeGetter, q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) (int64, error) {
 	switch q.Action {
 	case storage.ActionCreate:
 		return d.create(getStore, q, m)
@@ -26,16 +32,16 @@ func (d *adapter) executeWithStore(getStore storeGetter, q storage.Query, m Mode
 	case storage.ActionDelete:
 		return d.delete(getStore, q, m)
 	case storage.ActionReadOne:
-		return d.readOne(getStore, q, m)
+		return 0, d.readOne(getStore, q, m)
 	case storage.ActionReadAll:
-		return d.readAll(getStore, q, factory, each, eachJS)
+		return 0, d.readAll(getStore, q, factory, each, eachJS)
 	default:
-		return fmt.Err("Action not implemented")
+		return 0, fmt.Err("Action not implemented")
 	}
 }
 
 // execute implements storage.Adapter for IndexDB.
-func (d *adapter) execute(q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) error {
+func (d *adapter) execute(q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) (int64, error) {
 	return d.executeWithStore(d.getStore, q, m, factory, each, eachJS)
 }
 
@@ -59,11 +65,11 @@ func toJSValue(v any) (js.Value, error) {
 	}
 }
 
-func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) error {
+func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) (int64, error) {
 	// Establish a "readwrite" transaction block directed at the store mapped via q.Table.
 	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Iterate structurally mapping q.Columns and q.Values onto a conventional JavaScript Object
@@ -71,7 +77,7 @@ func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) error {
 	for i, col := range q.Columns {
 		jsVal, err := toJSValue(q.Values[i])
 		if err != nil {
-			return err
+			return 0, err
 		}
 		data.Set(col, jsVal)
 	}
@@ -79,13 +85,19 @@ func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) error {
 	// Deploy store.add() and explicitly await its resolution event.
 	req := store.Call("add", data)
 	_, err = await.Request(req)
-	return err
+	if err != nil {
+		if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsKeyExists)) {
+			return 0, storage.Duplicate(err)
+		}
+		return 0, err
+	}
+	return 1, nil
 }
 
-func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
+func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64, error) {
 	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	fields := m.Schema()
@@ -102,16 +114,16 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 		pkValue := q.Conditions[0].Value()
 		jsKey, err := toJSValue(pkValue)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		getReq := store.Call("get", jsKey)
 		val, err := await.Request(getReq)
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		if !val.Truthy() || val.IsUndefined() {
-			return storage.ErrNoRows
+			return 0, nil
 		}
 
 		// Overwrite fields
@@ -136,11 +148,11 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 					}
 					arr, err := toJSValue(b)
 					if err != nil {
-						return err
+						return 0, err
 					}
 					data.Set(f.Name, arr)
 				default:
-					return fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
+					return 0, fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
 				}
 			}
 		}
@@ -154,14 +166,20 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 			}
 			jsVal, err := toJSValue(q.Values[i])
 			if err != nil {
-				return err
+				return 0, err
 			}
 			data.Set(col, jsVal)
 		}
 
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
-		return err
+		if err != nil {
+			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
+				return 0, storage.Duplicate(err)
+			}
+			return 0, err
+		}
+		return 1, nil
 	}
 
 	// For cursors, collect all matching records first to avoid nested AwaitRequest deadlocks
@@ -185,10 +203,10 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 		return true
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if condErr != nil {
-		return condErr
+		return 0, condErr
 	}
 
 	for _, item := range matched {
@@ -213,11 +231,11 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 					}
 					arr, err := toJSValue(b)
 					if err != nil {
-						return err
+						return 0, err
 					}
 					data.Set(f.Name, arr)
 				default:
-					return fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
+					return 0, fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
 				}
 			}
 		}
@@ -231,7 +249,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 			}
 			jsVal, err := toJSValue(q.Values[i])
 			if err != nil {
-				return err
+				return 0, err
 			}
 			data.Set(col, jsVal)
 		}
@@ -239,17 +257,20 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) error {
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
 		if err != nil {
-			return err
+			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
+				return 0, storage.Duplicate(err)
+			}
+			return 0, err
 		}
 	}
 
-	return nil
+	return int64(len(matched)), nil
 }
 
-func (d *adapter) delete(getStore storeGetter, q storage.Query, m Model) error {
+func (d *adapter) delete(getStore storeGetter, q storage.Query, m Model) (int64, error) {
 	store, err := getStore(q.Table, "readwrite")
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	fields := m.Schema()
@@ -266,16 +287,30 @@ func (d *adapter) delete(getStore storeGetter, q storage.Query, m Model) error {
 		pkValue := q.Conditions[0].Value()
 		jsKey, err := toJSValue(pkValue)
 		if err != nil {
-			return err
+			return 0, err
 		}
+
+		getReq := store.Call("get", jsKey)
+		val, err := await.Request(getReq)
+		if err != nil {
+			return 0, err
+		}
+		if !val.Truthy() || val.IsUndefined() {
+			return 0, nil
+		}
+
 		req := store.Call("delete", jsKey)
 		_, err = await.Request(req)
-		return err
+		if err != nil {
+			return 0, err
+		}
+		return 1, nil
 	}
 
 	// Otherwise, find matching records using a cursor and delete them.
 	req := store.Call("openCursor")
 	var condErr error
+	var deletedCount int64 = 0
 
 	err = processCursorRequest(req, func(cursor js.Value) bool {
 		val := cursor.Get("value")
@@ -288,14 +323,18 @@ func (d *adapter) delete(getStore storeGetter, q storage.Query, m Model) error {
 
 		if match {
 			cursor.Call("delete")
+			deletedCount++
 		}
 
 		return true
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return condErr
+	if condErr != nil {
+		return 0, condErr
+	}
+	return deletedCount, nil
 }
 
 func (d *adapter) readOne(getStore storeGetter, q storage.Query, m Model) error {

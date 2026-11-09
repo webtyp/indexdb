@@ -11,7 +11,7 @@ import (
 func TestExecuteActionNotImplemented(t *testing.T) {
 	db := SetupDB(t, "action_not_implemented_test", &User{})
 
-	err := db.Exec("", storage.Query{Action: 999}, &User{})
+	_, err := db.Exec("", storage.Query{Action: 999}, &User{})
 	if err == nil {
 		t.Fatal("Expected error for unimplemented action")
 	}
@@ -31,7 +31,7 @@ func TestActionsOnMissingTable(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if err := db.Exec("", c.query, &User{}); err == nil {
+			if _, err := db.Exec("", c.query, &User{}); err == nil {
 				t.Fatalf("Expected error for %s on non-existent table", c.name)
 			}
 		})
@@ -59,7 +59,7 @@ func TestConnMisuseErrors(t *testing.T) {
 		t.Fatal("Expected error on invalid args to Query (missing model)")
 	}
 
-	if err := db.Exec(""); err == nil {
+	if _, err := db.Exec(""); err == nil {
 		t.Fatal("Expected error on Exec without query")
 	}
 }

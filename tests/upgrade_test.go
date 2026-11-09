@@ -55,7 +55,7 @@ func TestUpgrade(t *testing.T) {
 	}
 
 	// Insert row in A
-	err = db1.Exec("", storage.Query{Action: storage.ActionCreate, Table: "a", Columns: []string{"ID", "Name"}, Values: []any{"1", "A1"}}, &UpgradeModelA{ID: "1", Name: "A1"})
+	_, err = db1.Exec("", storage.Query{Action: storage.ActionCreate, Table: "a", Columns: []string{"ID", "Name"}, Values: []any{"1", "A1"}}, &UpgradeModelA{ID: "1", Name: "A1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestUpgrade(t *testing.T) {
 		t.Fatalf("expected A1, got %v", readA.Name)
 	}
 
-	err = db2.Exec("", storage.Query{Action: storage.ActionCreate, Table: "b", Columns: []string{"ID", "Desc"}, Values: []any{"1", "B1"}}, &UpgradeModelB{ID: "1", Desc: "B1"})
+	_, err = db2.Exec("", storage.Query{Action: storage.ActionCreate, Table: "b", Columns: []string{"ID", "Desc"}, Values: []any{"1", "B1"}}, &UpgradeModelB{ID: "1", Desc: "B1"})
 	if err != nil {
 		t.Fatal(err)
 	}

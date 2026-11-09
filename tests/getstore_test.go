@@ -19,7 +19,7 @@ func TestGetStore_ExistingTable_Succeeds(t *testing.T) {
 		Columns: []string{"ID", "Name", "Email"},
 		Values:  []any{"1", "Alice", "alice@example.com"},
 	}
-	if err := db.Exec("", query, &User{}); err != nil {
+	if _, err := db.Exec("", query, &User{}); err != nil {
 		t.Fatalf("Expected no error obtaining store for existing table, got: %v", err)
 	}
 }

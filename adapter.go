@@ -37,23 +37,24 @@ type adapter struct {
 }
 
 // Exec implements storage.Executor
-func (d *adapter) Exec(query string, args ...any) error {
+func (d *adapter) Exec(query string, args ...any) (storage.Result, error) {
 	if len(args) == 0 {
-		return fmt.Err("no query passed")
+		return storage.Affected(0), fmt.Err("no query passed")
 	}
 	q, ok := args[0].(storage.Query)
 	if !ok {
-		return fmt.Err("invalid query type")
+		return storage.Affected(0), fmt.Err("invalid query type")
 	}
 	if len(args) < 2 {
-		return fmt.Err("missing model argument")
+		return storage.Affected(0), fmt.Err("missing model argument")
 	}
 	m, ok := args[1].(Model)
 	if !ok {
-		return fmt.Err("invalid model type")
+		return storage.Affected(0), fmt.Err("invalid model type")
 	}
 
-	return d.execute(q, m, nil, nil, nil)
+	affected, err := d.execute(q, m, nil, nil, nil)
+	return storage.Affected(affected), err
 }
 
 // copyPointers copies each src[i] (a typed pointer, from a Model's own
@@ -126,7 +127,7 @@ func (d *adapter) QueryRow(query string, args ...any) storage.Scanner {
 		return &simpleScanner{err: fmt.Err("invalid model type")}
 	}
 
-	err := d.execute(q, m, nil, nil, nil)
+	_, err := d.execute(q, m, nil, nil, nil)
 	return &simpleScanner{err: err, m: m}
 }
 
@@ -263,7 +264,7 @@ func (d *adapter) Query(query string, args ...any) (storage.Rows, error) {
 		}
 	}
 
-	err := d.execute(q, m, factory, each, eachJS)
+	_, err := d.execute(q, m, factory, each, eachJS)
 	if err != nil {
 		return nil, err
 	}
@@ -530,23 +531,24 @@ func (t *txBoundAdapter) getTxStore(table, mode string) (js.Value, error) {
 	return t.adapter.storeFrom(t.tx, table)
 }
 
-func (t *txBoundAdapter) Exec(query string, args ...any) error {
+func (t *txBoundAdapter) Exec(query string, args ...any) (storage.Result, error) {
 	if len(args) == 0 {
-		return fmt.Err("no query passed")
+		return storage.Affected(0), fmt.Err("no query passed")
 	}
 	q, ok := args[0].(storage.Query)
 	if !ok {
-		return fmt.Err("invalid query type")
+		return storage.Affected(0), fmt.Err("invalid query type")
 	}
 	if len(args) < 2 {
-		return fmt.Err("missing model argument")
+		return storage.Affected(0), fmt.Err("missing model argument")
 	}
 	m, ok := args[1].(Model)
 	if !ok {
-		return fmt.Err("invalid model type")
+		return storage.Affected(0), fmt.Err("invalid model type")
 	}
 
-	return t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
+	affected, err := t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
+	return storage.Affected(affected), err
 }
 
 func (t *txBoundAdapter) QueryRow(query string, args ...any) storage.Scanner {
@@ -565,7 +567,7 @@ func (t *txBoundAdapter) QueryRow(query string, args ...any) storage.Scanner {
 		return &simpleScanner{err: fmt.Err("invalid model type")}
 	}
 
-	err := t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
+	_, err := t.executeWithStore(t.getTxStore, q, m, nil, nil, nil)
 	return &simpleScanner{err: err, m: m}
 }
 
@@ -608,7 +610,7 @@ func (t *txBoundAdapter) Query(query string, args ...any) (storage.Rows, error) 
 		}
 	}
 
-	err := t.executeWithStore(t.getTxStore, q, m, factory, each, eachJS)
+	_, err := t.executeWithStore(t.getTxStore, q, m, factory, each, eachJS)
 	if err != nil {
 		return nil, err
 	}

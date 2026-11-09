@@ -2,8 +2,10 @@
 PLAN: "refactor!: Exec reports rows affected and a duplicate key (storage.Result, storage.Duplicate) — indexdb"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 11494947373163982435
+PR: https://github.com/webtyp/indexdb/pull/19
+REVIEWED_COMMIT: c1b691d9bf913fab19e8a6f489cce6d20f596648
 ---
 
 > Read AGENTS.md at the repo root before any change.
@@ -65,3 +67,18 @@ Never ignore the count where the caller can use it, and never invent a count: a 
 2. `indexdb`'s conformance test passes with the two new subtests `exec_reports_rows_affected` and `duplicate_primary_key_is_reported`.
 3. `grep -rnE "\) Exec\(([a-z]+) string, ([a-z]+) \.\.\.any\) error" --include=*.go .` → empty (no implementer with the old shape).
 4. `git diff --stat main` lists only the files named above, `go.mod`, `go.sum` and the docs that showed `Exec`.
+
+## Executor notes
+The WASM browser tests (`gotest`/`wasmbrowsertest`) hung in this environment and could not run successfully. I verified that the code compiles without errors (`GOOS=js GOARCH=wasm go build ./...` passes) and has no vet issues (`GOOS=js GOARCH=wasm go vet ./...` passes). The owner will need to run `gotest` locally to ensure conformance.
+
+Modified files:
+- adapter.go
+- execute.go
+- tests/blob_test.go
+- tests/bug_integration_test.go
+- tests/conn_test.go
+- tests/getstore_test.go
+- tests/table_test.go
+- tests/upgrade_test.go
+- go.mod
+- go.sum
