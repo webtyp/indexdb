@@ -2,8 +2,10 @@
 PLAN: "refactor!: Exec reports rows affected and a duplicate key (storage.Result, storage.Duplicate) — indexdb"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 11494947373163982435
+PR: https://github.com/webtyp/indexdb/pull/19
+REVIEWED_COMMIT: c1b691d9bf913fab19e8a6f489cce6d20f596648
 ---
 
 > Read AGENTS.md at the repo root before any change.
