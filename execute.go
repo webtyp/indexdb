@@ -15,6 +15,12 @@ import (
 	"webtyp.com/storage"
 )
 
+// What IndexedDB reports when a key or a unique index is violated; an error that contains either is a storage.Duplicate.
+const (
+	jsConstraintError = "ConstraintError"
+	jsKeyExists       = "Key already exists"
+)
+
 type storeGetter func(table, mode string) (js.Value, error)
 
 func (d *adapter) executeWithStore(getStore storeGetter, q storage.Query, m Model, factory func() Model, each func(Model), eachJS func(js.Value)) (int64, error) {
@@ -80,7 +86,7 @@ func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) (int64,
 	req := store.Call("add", data)
 	_, err = await.Request(req)
 	if err != nil {
-		if err.Error() != "" && (containsSubstring(err.Error(), "ConstraintError") || containsSubstring(err.Error(), "Key already exists")) {
+		if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsKeyExists)) {
 			return 0, storage.Duplicate(err)
 		}
 		return 0, err
@@ -168,7 +174,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
 		if err != nil {
-			if err.Error() != "" && containsSubstring(err.Error(), "ConstraintError") {
+			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
 				return 0, storage.Duplicate(err)
 			}
 			return 0, err
@@ -251,7 +257,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
 		if err != nil {
-			if err.Error() != "" && containsSubstring(err.Error(), "ConstraintError") {
+			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
 				return 0, storage.Duplicate(err)
 			}
 			return 0, err
