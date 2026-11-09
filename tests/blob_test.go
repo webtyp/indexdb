@@ -66,7 +66,7 @@ func TestBlob_RoundTripExact(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	if err := db.Exec("", q, &item); err != nil {
+	if _, err := db.Exec("", q, &item); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestBlob_EmptyAndNil(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item1.ID, item1.Name, item1.Vec},
 	}
-	if err := db.Exec("", q1, &item1); err != nil {
+	if _, err := db.Exec("", q1, &item1); err != nil {
 		t.Fatalf("Create empty failed: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestBlob_EmptyAndNil(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item2.ID, item2.Name, item2.Vec},
 	}
-	if err := db.Exec("", q2, &item2); err != nil {
+	if _, err := db.Exec("", q2, &item2); err != nil {
 		t.Fatalf("Create nil failed: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestBlob_UpdateOtherColumnPreservesBlob(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	if err := db.Exec("", createQ, &item); err != nil {
+	if _, err := db.Exec("", createQ, &item); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestBlob_UpdateOtherColumnPreservesBlob(t *testing.T) {
 		Values:     []any{"updated"},
 		Conditions: []storage.Condition{storage.Eq("ID", "1")},
 	}
-	if err := db.Exec("", updateQ, &item); err != nil {
+	if _, err := db.Exec("", updateQ, &item); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestBlob_UpdateReplacesBytes(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	if err := db.Exec("", createQ, &item); err != nil {
+	if _, err := db.Exec("", createQ, &item); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -222,7 +222,7 @@ func TestBlob_UpdateReplacesBytes(t *testing.T) {
 		Values:     []any{buf2},
 		Conditions: []storage.Condition{storage.Eq("ID", "1")},
 	}
-	if err := db.Exec("", updateQ, &item); err != nil {
+	if _, err := db.Exec("", updateQ, &item); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestBlob_EqCondition(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item1.ID, item1.Name, item1.Vec},
 	}
-	if err := db.Exec("", q1, &item1); err != nil {
+	if _, err := db.Exec("", q1, &item1); err != nil {
 		t.Fatalf("Create item1 failed: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestBlob_EqCondition(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item2.ID, item2.Name, item2.Vec},
 	}
-	if err := db.Exec("", q2, &item2); err != nil {
+	if _, err := db.Exec("", q2, &item2); err != nil {
 		t.Fatalf("Create item2 failed: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestBlob_OrderByBlobIsError(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	_ = db.Exec("", createQ, &item)
+	_, _ = db.Exec("", createQ, &item)
 
 	readAllQ := storage.Query{
 		Action:  storage.ActionReadAll,
@@ -317,7 +317,7 @@ func TestUnsupportedType_IsErrorNotPanic(t *testing.T) {
 		Columns: []string{"ID", "Nums"},
 		Values:  []any{item.ID, item.Nums},
 	}
-	err := db.Exec("", createQ, &item)
+	_, err := db.Exec("", createQ, &item)
 	if err == nil {
 		t.Fatal("Expected error for unsupported field type, got nil")
 	}
@@ -340,7 +340,7 @@ func TestBlob_ReadAllWithFactoryScansBlobColumn(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	if err := db.Exec("", createQ, &item); err != nil {
+	if _, err := db.Exec("", createQ, &item); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -391,7 +391,7 @@ func TestTx_BatchInsertOneTransaction(t *testing.T) {
 			Columns: []string{"ID", "Name", "Vec"},
 			Values:  []any{v.ID, v.Name, v.Vec},
 		}
-		if err := tx.Exec("", q, &v); err != nil {
+		if _, err := tx.Exec("", q, &v); err != nil {
 			t.Fatalf("Batch insert item %d failed: %v", i, err)
 		}
 	}
@@ -437,7 +437,7 @@ func TestTx_RollbackDiscards(t *testing.T) {
 			Columns: []string{"ID", "Name", "Vec"},
 			Values:  []any{v.ID, v.Name, v.Vec},
 		}
-		if err := tx.Exec("", q, &v); err != nil {
+		if _, err := tx.Exec("", q, &v); err != nil {
 			t.Fatalf("Insert item %d failed: %v", i, err)
 		}
 	}
@@ -489,7 +489,7 @@ func TestTx_RollbackAfterCommitIsSafe(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{v.ID, v.Name, v.Vec},
 	}
-	if err := tx.Exec("", q, &v); err != nil {
+	if _, err := tx.Exec("", q, &v); err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}
 
@@ -516,7 +516,7 @@ func TestTx_LargeShardBlob(t *testing.T) {
 		Columns: []string{"ID", "Name", "Vec"},
 		Values:  []any{item.ID, item.Name, item.Vec},
 	}
-	if err := db.Exec("", q, &item); err != nil {
+	if _, err := db.Exec("", q, &item); err != nil {
 		t.Fatalf("Create 4MB shard failed: %v", err)
 	}
 

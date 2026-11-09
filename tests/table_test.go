@@ -24,7 +24,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Columns: []string{"ID", "Name", "Email"},
 		Values:  []any{userOne.ID, userOne.Name, userOne.Email},
 	}
-	err := db.Exec("", query, &userOne)
+	_, err := db.Exec("", query, &userOne)
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Values:     []any{userOne.ID, userOne.Name, userOne.Email},
 		Conditions: []storage.Condition{storage.Eq("ID", userOne.ID)},
 	}
-	err = db.Exec("", updateQuery, &userOne)
+	_, err = db.Exec("", updateQuery, &userOne)
 	if err != nil {
 		t.Fatalf("Failed to update user: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Table:      "user",
 		Conditions: []storage.Condition{storage.Eq("ID", userOne.ID)},
 	}
-	err = db.Exec("", deleteQuery, &userOne)
+	_, err = db.Exec("", deleteQuery, &userOne)
 	if err != nil {
 		t.Fatalf("Failed to delete user: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Table:      "user",
 		Conditions: []storage.Condition{storage.Eq("ID", "999999")},
 	}
-	_ = db.Exec("", nonExistentDelete, &User{ID: "999999"})
+	_, _ = db.Exec("", nonExistentDelete, &User{ID: "999999"})
 
 	// Delete multi-condition (now fully supported!)
 	multiDeleteQuery := storage.Query{
@@ -107,7 +107,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Table:      "user",
 		Conditions: []storage.Condition{storage.Eq("ID", "1"), storage.Eq("Name", "Alice")},
 	}
-	err = db.Exec("", multiDeleteQuery, &User{ID: "1"})
+	_, err = db.Exec("", multiDeleteQuery, &User{ID: "1"})
 	if err != nil {
 		t.Fatalf("Unexpected error finding multi-condition delete: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestIndexDBCrudOperations(t *testing.T) {
 		Columns: []string{"ID", "Name", "Email"},
 		Values:  []any{bob.ID, bob.Name, bob.Email},
 	}
-	err = db.Exec("", createBobQuery, &bob)
+	_, err = db.Exec("", createBobQuery, &bob)
 	if err != nil {
 		t.Fatalf("Failed to create Bob: %v", err)
 	}
@@ -193,5 +193,5 @@ func TestReadAllEdgeCases(t *testing.T) {
 		Columns: []string{"ID", "Name", "Email"},
 		Values:  []any{user.ID, user.Name, user.Email},
 	}
-	_ = db.Exec("", query, &user)
+	_, _ = db.Exec("", query, &user)
 }
