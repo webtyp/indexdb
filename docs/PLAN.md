@@ -2,6 +2,8 @@
 PLAN: "refactor!: Exec reports rows affected and a duplicate key (storage.Result, storage.Duplicate) — indexdb"
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 11494947373163982435
 ---
 
 > Read AGENTS.md at the repo root before any change.
