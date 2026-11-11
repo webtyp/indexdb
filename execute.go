@@ -19,6 +19,7 @@ import (
 const (
 	jsConstraintError = "ConstraintError"
 	jsKeyExists       = "Key already exists"
+	jsUniquenessReq   = "uniqueness requirements"
 )
 
 type storeGetter func(table, mode string) (js.Value, error)
@@ -86,7 +87,7 @@ func (d *adapter) create(getStore storeGetter, q storage.Query, m Model) (int64,
 	req := store.Call("add", data)
 	_, err = await.Request(req)
 	if err != nil {
-		if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsKeyExists)) {
+		if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsKeyExists) || containsSubstring(err.Error(), jsUniquenessReq)) {
 			return 0, storage.Duplicate(err)
 		}
 		return 0, err
@@ -174,7 +175,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
 		if err != nil {
-			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
+			if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsUniquenessReq)) {
 				return 0, storage.Duplicate(err)
 			}
 			return 0, err
@@ -257,7 +258,7 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 		putReq := store.Call("put", data)
 		_, err = await.Request(putReq)
 		if err != nil {
-			if err.Error() != "" && containsSubstring(err.Error(), jsConstraintError) {
+			if err.Error() != "" && (containsSubstring(err.Error(), jsConstraintError) || containsSubstring(err.Error(), jsUniquenessReq)) {
 				return 0, storage.Duplicate(err)
 			}
 			return 0, err
@@ -612,7 +613,7 @@ func checkConditions(val js.Value, conditions []storage.Condition) (bool, error)
 // checkCondition checks if a JS value satisfies a condition
 func checkCondition(val js.Value, cond storage.Condition) (bool, error) {
 	// A Uint8Array is an object, so scalar comparisons below cannot apply.
-	// Blobs support equality and inequality only — never <, >, LIKE or IN.
+	// Blobs support equality and inequality only — never <, >, LIKE, ILIKE or IN.
 	if val.Type() == js.TypeObject && !val.IsNull() {
 		lenProp := val.Get("length")
 		if !lenProp.IsUndefined() {
@@ -670,6 +671,13 @@ func checkCondition(val js.Value, cond storage.Condition) (bool, error) {
 		patVal, okP := condVal.(string)
 		if okS && okP {
 			return matchLike(sVal, patVal), nil
+		}
+		return false, nil
+	case "ILIKE":
+		sVal, okS := goVal.(string)
+		patVal, okP := condVal.(string)
+		if okS && okP {
+			return matchLike(fmt.ToLower(sVal), fmt.ToLower(patVal)), nil
 		}
 		return false, nil
 	case ">":
