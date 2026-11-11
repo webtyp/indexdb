@@ -2,8 +2,10 @@
 PLAN: "feat: indexdb honours storage.ILike"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 9294822643733930796
+PR: https://github.com/webtyp/indexdb/pull/20
+REVIEWED_COMMIT: 5f6790d7f76dbb5a234fd13259d1be406af6a2d6
 ---
 
 > Read AGENTS.md at the repo root before any change.
