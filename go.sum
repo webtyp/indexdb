@@ -8,3 +8,5 @@ webtyp.com/model v0.2.21 h1:bz+hifcNWuXjK96qLML2xnk0ItEkHnG0Kb02js9nMJg=
 webtyp.com/model v0.2.21/go.mod h1:OkyYeE3GOG8eAQGhd9wVsORAhr+xYj3q8avpoGXG25c=
 webtyp.com/storage v0.2.0 h1:yLgoMn4zwcVyHQ/vzeIl1SYxZ6Qbsj8/cxOBrWqXym0=
 webtyp.com/storage v0.2.0/go.mod h1:yJ/FUhWqroe+5J9JFlZdAwCOa99SXJ1wS/H/PZw64tU=
+webtyp.com/storage v0.2.3 h1:vBPr0esYSpzl9ZbTDLGe5e3xvoxNjZAbM+YMYfej42w=
+webtyp.com/storage v0.2.3/go.mod h1:wKf0res0uQc46vj0FKJ7NQlWNZF4u7EssBvDj02Kuuo=
