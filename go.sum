@@ -1,7 +1,7 @@
 webtyp.com/await v0.1.2 h1:0rZLLCvu+y/8CJU0YH2ZGi/OLygZwZTBJIrGi0+Z0Fg=
 webtyp.com/await v0.1.2/go.mod h1:SiF0Y5G9XEnN5u6SISxLU4GW/8y9ENR1K3fQF1uHMCQ=
-webtyp.com/fmt v1.0.1 h1:W1A7/1mBVb7bwKYssmM0wPYoRgPu+jiV/BmSItefiRU=
-webtyp.com/fmt v1.0.1/go.mod h1:FmTxx713R45J21kbH5JOmKGaaCap3fJPA9Yl2n4Ch7U=
+webtyp.com/fmt v1.0.2 h1:otV3cuFjSfn1c2s5l8nNd60+ycW5ffPgfptXHZLYGUM=
+webtyp.com/fmt v1.0.2/go.mod h1:FmTxx713R45J21kbH5JOmKGaaCap3fJPA9Yl2n4Ch7U=
 webtyp.com/jsvalue v0.1.6 h1:SegmAO9FRc/A7zZzVVtwi8ylqse6vwrCSSSNPq6XPy0=
 webtyp.com/jsvalue v0.1.6/go.mod h1:EZjDHh5THDAhIwAV3OvsTFRI6KdSjXiuSfT6p662Zpw=
 webtyp.com/model v0.2.21 h1:bz+hifcNWuXjK96qLML2xnk0ItEkHnG0Kb02js9nMJg=
