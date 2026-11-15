@@ -6,7 +6,7 @@ require webtyp.com/fmt v1.0.2
 
 require (
 	webtyp.com/jsvalue v0.1.6
-	webtyp.com/model v0.2.21
+	webtyp.com/model v0.2.22
 	webtyp.com/storage v0.2.3
 )
 
