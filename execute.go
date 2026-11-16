@@ -128,34 +128,9 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 		}
 
 		// Overwrite fields
-		data := js.Global().Get("Object").New()
-		for _, f := range fields {
-			jsVal := val.Get(f.Name)
-			if !jsVal.IsUndefined() {
-				switch f.Type.Storage() {
-				case FieldText, FieldRaw:
-					data.Set(f.Name, jsVal.String())
-				case FieldInt:
-					data.Set(f.Name, int64(jsVal.Int()))
-				case FieldFloat:
-					data.Set(f.Name, jsVal.Float())
-				case FieldBool:
-					data.Set(f.Name, jsVal.Bool())
-				case FieldBlob:
-					n := jsVal.Get("length").Int()
-					b := make([]byte, n)
-					if n > 0 {
-						js.CopyBytesToGo(b, jsVal)
-					}
-					arr, err := toJSValue(b)
-					if err != nil {
-						return 0, err
-					}
-					data.Set(f.Name, arr)
-				default:
-					return 0, fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
-				}
-			}
+		data, err := copyStored(val, fields)
+		if err != nil {
+			return 0, err
 		}
 
 		for i, col := range q.Columns {
@@ -211,34 +186,9 @@ func (d *adapter) update(getStore storeGetter, q storage.Query, m Model) (int64,
 	}
 
 	for _, item := range matched {
-		data := js.Global().Get("Object").New()
-		for _, f := range fields {
-			jsVal := item.val.Get(f.Name)
-			if !jsVal.IsUndefined() {
-				switch f.Type.Storage() {
-				case FieldText, FieldRaw:
-					data.Set(f.Name, jsVal.String())
-				case FieldInt:
-					data.Set(f.Name, int64(jsVal.Int()))
-				case FieldFloat:
-					data.Set(f.Name, jsVal.Float())
-				case FieldBool:
-					data.Set(f.Name, jsVal.Bool())
-				case FieldBlob:
-					n := jsVal.Get("length").Int()
-					b := make([]byte, n)
-					if n > 0 {
-						js.CopyBytesToGo(b, jsVal)
-					}
-					arr, err := toJSValue(b)
-					if err != nil {
-						return 0, err
-					}
-					data.Set(f.Name, arr)
-				default:
-					return 0, fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
-				}
-			}
+		data, err := copyStored(item.val, fields)
+		if err != nil {
+			return 0, err
 		}
 
 		for i, col := range q.Columns {
@@ -865,4 +815,43 @@ func hasPrefix(s, prefix string) bool {
 
 func hasSuffix(s, suffix string) bool {
 	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+// copyStored copies a stored object into a new one, each schema field with its Go type, plus FieldTextSearch:
+// an update then overlays the columns it names, so a column it does not name keeps its value.
+func copyStored(val js.Value, fields []Field) (js.Value, error) {
+	data := js.Global().Get("Object").New()
+	for _, f := range fields {
+		jsVal := val.Get(f.Name)
+		if jsVal.IsUndefined() {
+			continue
+		}
+		switch f.Type.Storage() {
+		case FieldText, FieldRaw:
+			data.Set(f.Name, jsVal.String())
+		case FieldInt:
+			data.Set(f.Name, int64(jsVal.Int()))
+		case FieldFloat:
+			data.Set(f.Name, jsVal.Float())
+		case FieldBool:
+			data.Set(f.Name, jsVal.Bool())
+		case FieldBlob:
+			n := jsVal.Get("length").Int()
+			b := make([]byte, n)
+			if n > 0 {
+				js.CopyBytesToGo(b, jsVal)
+			}
+			arr, err := toJSValue(b)
+			if err != nil {
+				return js.Value{}, err
+			}
+			data.Set(f.Name, arr)
+		default:
+			return js.Value{}, fmt.Err("indexdb: unsupported field type", f.Type.Storage().String(), "in column", f.Name)
+		}
+	}
+	if ts := val.Get(FieldTextSearch); !ts.IsUndefined() && !ts.IsNull() {
+		data.Set(FieldTextSearch, ts.String())
+	}
+	return data, nil
 }

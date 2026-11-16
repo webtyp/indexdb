@@ -272,9 +272,30 @@ func (d *adapter) Query(query string, args ...any) (storage.Rows, error) {
 	return &simpleRows{
 		models: models,
 		values: values,
-		fields: m.Schema(),
+		fields: readFields(q, m),
 		idx:    0,
 	}, nil
+}
+
+// readFields is what a read returns, in order: the fields of the columns the query names, or the model's schema
+// when it names none. A named column outside the schema is FieldTextSearch, the one text column the framework
+// keeps outside every model (orm writes it, crud filters on it).
+func readFields(q storage.Query, m Model) []Field {
+	schema := m.Schema()
+	if len(q.Columns) == 0 {
+		return schema
+	}
+	out := make([]Field, len(q.Columns))
+	for i, col := range q.Columns {
+		out[i] = Field{Name: col, Type: Text()}
+		for _, f := range schema {
+			if f.Name == col {
+				out[i] = f
+				break
+			}
+		}
+	}
+	return out
 }
 
 // Close implements storage.Executor

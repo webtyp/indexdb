@@ -1,10 +1,10 @@
 webtyp.com/await v0.1.2 h1:0rZLLCvu+y/8CJU0YH2ZGi/OLygZwZTBJIrGi0+Z0Fg=
 webtyp.com/await v0.1.2/go.mod h1:SiF0Y5G9XEnN5u6SISxLU4GW/8y9ENR1K3fQF1uHMCQ=
-webtyp.com/fmt v1.0.2 h1:otV3cuFjSfn1c2s5l8nNd60+ycW5ffPgfptXHZLYGUM=
-webtyp.com/fmt v1.0.2/go.mod h1:FmTxx713R45J21kbH5JOmKGaaCap3fJPA9Yl2n4Ch7U=
+webtyp.com/fmt v1.0.3 h1:Tb9ZRKOwrRpy+ySEC9mXDEXRH+nsKZA4QZhdmw2hC8I=
+webtyp.com/fmt v1.0.3/go.mod h1:FmTxx713R45J21kbH5JOmKGaaCap3fJPA9Yl2n4Ch7U=
 webtyp.com/jsvalue v0.1.6 h1:SegmAO9FRc/A7zZzVVtwi8ylqse6vwrCSSSNPq6XPy0=
 webtyp.com/jsvalue v0.1.6/go.mod h1:EZjDHh5THDAhIwAV3OvsTFRI6KdSjXiuSfT6p662Zpw=
-webtyp.com/model v0.2.23 h1:9FL8UTV7RkA95qG1aqnJZx+SKkrzNGjiapUP9MeHooE=
-webtyp.com/model v0.2.23/go.mod h1:Y1oiArBHsWkhIZr3o1wiFNioSePcit3OiVQp3+OBjNk=
-webtyp.com/storage v0.2.3 h1:vBPr0esYSpzl9ZbTDLGe5e3xvoxNjZAbM+YMYfej42w=
-webtyp.com/storage v0.2.3/go.mod h1:wKf0res0uQc46vj0FKJ7NQlWNZF4u7EssBvDj02Kuuo=
+webtyp.com/model v0.2.24 h1:JYflv0f7c/D1Wg83VucTPdCDfqFaI3LcGmKrYHfAqLE=
+webtyp.com/model v0.2.24/go.mod h1:UQYKPyr+VmirnvSoWNmFgUDAijSlT2x3Ynn/QpUbkoU=
+webtyp.com/storage v0.2.8 h1:v+wstyP1bjSfIgTN/Xoq0JwC0nr7lfbgsXWWYK0a0Ec=
+webtyp.com/storage v0.2.8/go.mod h1:wI7dY1W2M/P6f51as2uSUthPaeE8pmOz9M3NkPfoZXg=

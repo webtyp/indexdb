@@ -2,12 +2,12 @@ module webtyp.com/indexdb
 
 go 1.25.2
 
-require webtyp.com/fmt v1.0.2
+require webtyp.com/fmt v1.0.3
 
 require (
 	webtyp.com/jsvalue v0.1.6
-	webtyp.com/model v0.2.23
-	webtyp.com/storage v0.2.3
+	webtyp.com/model v0.2.24
+	webtyp.com/storage v0.2.8
 )
 
 require webtyp.com/await v0.1.2
